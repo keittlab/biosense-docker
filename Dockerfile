@@ -50,8 +50,8 @@ ENV RASPBIAN_BASE_URL="https://downloads.raspberrypi.org/raspbian_lite/images/ra
 COPY Dockerfile "${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.*" /home/agent/
 
 # Download the image and checksum file
-RUN test -f ${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.* || sudo curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_IMAGE}
-RUN sudo curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_SHA256}
+RUN test -f ${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.* || curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_IMAGE}
+RUN curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_SHA256}
 
 # Debugging: Print the contents of the checksum file to ensure it is correct
 RUN cat ${RASPBIAN_SHA256}
@@ -63,7 +63,7 @@ RUN CHECKSUM=$(awk '{ print $1 }' ${RASPBIAN_SHA256}) && \
     sha256sum -c checksum.txt
 
 # Unzip the image
-RUN sudo unzip ${RASPBIAN_IMAGE} -d /home/agent
+RUN unzip ${RASPBIAN_IMAGE} -d /home/agent
 
 # Install sdm utility
 RUN sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | sudo bash
