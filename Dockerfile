@@ -6,6 +6,9 @@ ARG RASPBIAN_DIR_DATE="2020-02-14"
 ARG RASPBIAN_IMAGE_DATE="2020-02-13"
 ARG HOSTNAME="keittlabsens"
 
+# Make sure we're up to date
+RUN apt-get update && apt-get -y full-upgrade
+
 # Install necessary packages
 RUN apt-get update && apt-get install -y \
     sudo \
@@ -17,13 +20,16 @@ RUN apt-get update && apt-get install -y \
     parted \
     kpartx \
     qemu-user-static \
+    systemd-container \
+    binfmt-support \
     xz-utils \
     zip \
     bzip2 \
+    file \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a new user 'agent' and set a password
-RUN useradd -m agent && echo "agent:password" | chpasswd
+RUN useradd -m agent && echo "agent:agent" | chpasswd
 
 # Add the new user to the sudo group
 RUN usermod -aG sudo agent
@@ -40,8 +46,11 @@ ENV RASPBIAN_IMAGE="${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.zip"
 ENV RASPBIAN_SHA256="${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.zip.sha256"
 ENV RASPBIAN_BASE_URL="https://downloads.raspberrypi.org/raspbian_lite/images/raspbian_lite-${RASPBIAN_DIR_DATE}"
 
+# Use a local copy if available
+COPY Dockerfile "${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.*" /home/agent/
+
 # Download the image and checksum file
-RUN sudo curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_IMAGE}
+RUN test -f ${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.* || sudo curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_IMAGE}
 RUN sudo curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_SHA256}
 
 # Debugging: Print the contents of the checksum file to ensure it is correct
@@ -59,8 +68,7 @@ RUN sudo unzip ${RASPBIAN_IMAGE} -d /home/agent
 # Install sdm utility
 RUN sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | sudo bash
 
-RUN sudo sdm --customize --expand-root --host ${HOSTNAME} --enable-ssh --autologin
-
+#RUN sudo sdm --customize --hostname ${HOSTNAME} "${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.img"
 
 # Example command to run after verification (modify as needed)
 CMD ["bash"]
