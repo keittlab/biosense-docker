@@ -25,4 +25,5 @@ CHECKSUM=$(awk '{ print $1 }' ${SHA_FILE}) && \
 
 unzip ${IMAGE_FILE} -d ${IMAGE_SOURCE_DIR}
 
-rm -f ${IMAGE_FILE} ${SHA_FILE}
+rm -f ${IMAGE_FILE} ${SHA_FILE} checksum.txt
+
