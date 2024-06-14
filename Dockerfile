@@ -42,7 +42,5 @@ RUN mkdir /home/agent/hostdir
 # Install sdm utility
 RUN sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | sudo bash
 
-#RUN sudo sdm --customize --hostname ${HOSTNAME} "${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.img"
-
 # Example command to run after verification (modify as needed)
 CMD ["bash"]
