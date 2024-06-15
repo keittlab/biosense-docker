@@ -1,0 +1,31 @@
+#!/bin/bash
+
+export CONTAINER_IMAGE_PATH="/home/agent/hostdir/$1"
+
+DOCKER_IMAGE_NAME="biosense-sdm"
+
+docker build -t "$DOCKER_IMAGE_NAME" .
+
+# Start the Docker container
+docker run -it --rm --privileged -v .:/home/agent/hostdir -v /dev:/dev "$DOCKER_IMAGE_NAME" /bin/bash -v -c "
+sudo fdisk -l hostdir/$1
+sudo losetup -Pf hostdir/$1
+sudo mkdir -p /mnt/raspbian_boot
+sudo mkdir -p /mnt/raspbian_root
+sudo mount /dev/loop0p1 /mnt/raspbian_boot
+sudo mount /dev/loop0p2 /mnt/raspbian_root
+sudo qemu-img resize -f raw $CONTAINER_IMAGE_PATH 2G
+sudo qemu-system-arm \
+  -kernel /mnt/raspbian_boot/kernel.img \
+  -dtb /mnt/raspbian_boot/bcm2710-rpi-3-b.dtb \
+  -cpu arm1176 \
+  -m 1G \
+  -machine raspi2b \
+  -no-reboot \
+  -append 'root=/dev/sda2 rootfstype=ext4 rw' \
+  -drive file=$CONTAINER_IMAGE_PATH,format=raw \
+  -display curses \
+  -nographic
+"
+
+exit 0

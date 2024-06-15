@@ -121,16 +121,15 @@ docker build -t "$DOCKER_IMAGE_NAME" .
 # disable fake-hwclock? tiggerhappy?
 # enable trim?
 # need to set firewall rules
+# setup automatic timezone discovery
 
+# Some of these are from instructions in the biosense github repo
 docker run --privileged -it --rm -v .:/home/agent/hostdir -v /dev:/dev "$DOCKER_IMAGE_NAME" /bin/bash -v -c "
 sudo sdm \
-    --plugin user:"deluser=pi" \
-    --plugin user:"adduser=biosense\\\|password=biosense" \
-    --plugin disables:piwiz \
-    --plugin btwifiset:"country=US" \
-    --plugin imon \
+    --plugin @/home/agent/hostdir/sdm-plugin-commands \
     --autologin \
     --expand-root \
+    --regen-ssh-host-keys \
     --hostname $IMAGE_HOSTNAME \
     --burnfile $CONTAINER_CUSTOMIZED_IMAGE_FILE \
     $CONTAINER_IMAGE_FILE

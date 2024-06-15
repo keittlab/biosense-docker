@@ -14,9 +14,16 @@ RUN apt-get update && apt-get install -y \
     rsync \
     parted \
     kpartx \
+    qemu-utils \
     qemu-user-static \
+    qemu-system-arm \
+    qemu-efi-aarch64 \
+    ipxe-qemu \
+    qemu-efi-arm \
+    qemu-system-gui \
     systemd-container \
     binfmt-support \
+    util-linux \
     xz-utils \
     zip \
     bzip2 \
@@ -41,6 +48,9 @@ RUN mkdir /home/agent/hostdir
 
 # Install sdm utility
 RUN sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | sudo bash
+
+COPY sdm-biosense-setup-plugin /usr/local/sdm/local-plugins
+RUN sudo chmod +x /usr/local/sdm/local-plugins/sdm-biosense-setup-plugin
 
 # Example command to run after verification (modify as needed)
 CMD ["bash"]

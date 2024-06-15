@@ -1,0 +1,162 @@
+#!/bin/bash
+#
+# Example from https://github.com/gitbls/sdm/blob/master/Docs/Example-Plugin.md
+#
+function loadparams() {
+    source $SDMPT/etc/sdm/sdm-readparams
+}
+#
+# $1 is the phase: "0", "1", or "post-install"
+#
+phase=$1
+pfx="$(basename $0)"
+args="$2"
+vldargs=""
+loadparams
+
+if [ "$phase" == "0" ]
+then
+    #
+    # In Phase 0 all references to directories in the image
+    # must be preceded by $SDMPT
+    #
+    logtoboth "* Plugin $pfx: Start Phase 0"
+    logfreespace "at start of $pfx Phase 0"
+    plugin_getargs $pfx "$args" "$vldargs"
+    #
+    # Print the keys found (example usage). plugin_getargs returns the list of found keys in $foundkeys
+    #
+    # plugin_printkeys
+    #plugin_dbgprint "This is how to do a Plugin Debug printout"      # Will only be printed if --plugin-debug specified
+    # logtoboth "> Plugin $pfx: Create NFS environment"
+    # for f in h k l rpi ssd
+    # do
+	# [ ! -d $SDMPT/$f ] && mkdir $SDMPT/$f
+    # done
+    
+    # echo "#/        192.168.92.0/24(rw,no_root_squash,no_subtree_check,insecure)" >> $SDMPT/etc/.my-exports
+    
+    # logtoboth "> Plugin $pfx: Copy /usr/local/bin scripts"
+    # for f in \
+	# ddpizip \
+	#     wlanset \
+	#     btset \
+	#     xdmset \
+	#     tman
+    # do
+    #     cp -f $csrc/local/$f $SDMPT/usr/local/bin
+    # done
+
+    # if [ "$myuser" != "" ]
+    # then
+	# logtoboth "> Plugin $pfx: Copy $myuser login files to $SDMPT/home/$myuser"
+	# [ ! -d $SDMPT/home/$myuser ] && mkdir $SDMPT/home/$myuser
+	# cp -f $csrc/home/$myuser/{.bashrc,.colordiffrc,.dircolors,.emacs,.inputrc,.vimrc,.Xmodmap,.Xdefaults,.tmux.conf} $SDMPT/home/$myuser
+	# echo "source /home/$myuser/.bashrc" > $SDMPT/home/$myuser/.bash_profile
+	# chmod 755 $SDMPT/home/$myuser/.bash_profile
+	# [ ! -d $SDMPT/home/$myuser/bin ] && mkdir $SDMPT/home/$myuser/bin
+	# for fd in .icewm \
+	# 	      .lftp \
+	# 	      .ncftp
+	# do
+	#     [ -d $csrc/home/$myuser/$fd ] && cp -a -f $csrc/home/$myuser/$fd $SDMPT/home/$myuser/$fd
+	# done
+	
+	# logtoboth "> Plugin $pfx: Copy $csrc/home/bls/ssh-mydomain to $SDMPT/home/$myuser"
+	# cp -a $csrc/home/bls/ssh-mydomain $SDMPT/home/$myuser/.ssh
+	# chmod 700 $SDMPT/home/$myuser/.ssh
+
+	# logtoboth "> Plugin $pfx: Copy login scripts to $SDMPT/root"
+	# [ ! -d $SDMPT/root/orig ] && mkdir $SDMPT/root/orig && mv $SDMPT/root/.bashrc $SDMPT/root/orig
+	# [ -f $SDMPT/root/.bash_profile ] && mv $SDMPT/root/.bash_profile $SDMPT/root/orig
+	# cp $csrc/home/${myuser}/{.bashrc,.colordiffrc,.dircolors,.emacs,.inputrc,.tmux.conf} $SDMPT/root
+	# echo "source /root/.bashrc" > $SDMPT/root/.bash_profile
+	# chmod 755 $SDMPT/root/.bash_profile
+	# cp -a $SDMPT/home/$myuser/.ssh $SDMPT/root/.ssh
+	# chown -R root.root $SDMPT/root/.ssh
+    # fi
+    
+    logfreespace "at end of $pfx Phase 0"
+    logtoboth "* Plugin $pfx: Complete Phase 0"
+
+elif [ "$phase" == "1" ]
+then
+    #
+    # Phase 1 (in nspawn)
+    #
+    # In Phase 1 all references to directories in the image can be direct
+    #
+    logtoboth "* Plugin $pfx: Phase 1"
+    plugin_getargs $pfx "$args" "$vldargs"
+    logfreespace "at start of $pfx Phase 1"
+    
+    # logtoboth "> Plugin $pfx: Disable $SDMPT/etc/profile.d/wifi-check.sh and sshpwd.sh"
+    # [ -f $SDMPT/etc/profile.d/wifi-check.sh ] && mv $SDMPT/etc/profile.d/wifi-check.sh $SDMPT/etc/profile.d/.sdm.wifi-check.sh
+    # [ -f $SDMPT/etc/profile.d/sshpwd.sh ] &&     mv $SDMPT/etc/profile.d/sshpwd.sh $SDMPT/etc/profile.d/.sdm.sshpwd.sh
+    
+    # logtoboth "> Plugin $pfx: Set APT::Install-Recommends to false"
+    # echo "APT::Install-Recommends \"false\";" >> /etc/apt/apt.conf.d/03-norecommends
+
+    # Since we have autologin, this will set an autologout 
+    # This gives you 10 minutes to access the system after reboot
+    # This will help with lost password, although it does give
+    # others an easy way to access the system by simply restarting it
+    # This is system-wide for all regular user accounts
+    # You can disable by typing "unset TMOUT"
+    echo "TMOUT=600" > /etc/profile.d/autologout.sh && \
+    echo "export TMOUT" >> /etc/profile.d/autologout.sh && \
+    chmod +x /etc/profile.d/autologout.sh && \
+    logtoboth "Automatic shell logout set to 10 minutes."
+
+    logfreespace "at end of $pfx Phase 1"
+    logtoboth "* Plugin $pfx: Phase 1 completed"
+else
+    #
+    # Post-install edits
+    #
+    logtoboth "* Plugin $pfx: Phase post-install"
+    plugin_getargs $pfx "$args" ""
+    logfreespace "at start of $pfx Phase post-install"
+    #
+    # Set fstab ext4 partition to a higher commit
+    #
+    # logtoboth "> Plugin $pfx: Set ext4 partition commit higher"
+    # sed -i "s/ext4    defaults,noatime/ext4    defaults,noatime,commit=300/" /etc/fstab
+
+    # This needs work -- exceptions
+    logtoboth `python3 -c '
+
+    import board
+    import digitalio
+    import busio
+
+    # Try to great a Digital input
+    pin = digitalio.DigitalInOut(board.D4)
+    print("Digital IO ok!")
+
+    # Try to create an I2C device
+    i2c = busio.I2C(board.SCL, board.SDA)
+    print("I2C ok!")
+
+    # Try to create an SPI device
+    spi = busio.SPI(board.SCLK, board.MOSI, board.MISO)
+    print("SPI ok!")
+
+    '`
+
+    SOUND_FILE=/tmp/test.wav
+    HWDEVICE=`echo "$(arecord -l |grep 'card.*USB' | sed 's/.*card //' | cut -d " " -f 1|cut -c 1),$(arecord -l |grep 'card.*USB' | sed 's/.*device //' | cut -d " " -f 1|cut -c 1)"`
+    /usr/bin/arecord --duration=1 --format=cd --file-type=wav --device=hw:$HWDEVICE $SOUND_FILE
+    if [ -f "$SOUND_FILE" ]
+    then
+        logtoboth "Succesfully recorded sound."
+        rm -f $SOUND_FILE
+    else
+        logtoboth "Sound recording failed."
+    fi
+
+
+    logfreespace "at end of $pfx Custom Phase post-install"
+    logtoboth "* Plugin $pfx: Phase post-install Completed"
+fi
+exit 0
