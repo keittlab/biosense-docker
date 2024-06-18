@@ -3,18 +3,18 @@
 IMAGE_SOURCE_DIR="source_images"
 IMAGE_DEST_DIR="customized_images"
 
-RASPBIAN_DIR_DATE="2020-02-14"
-RASPBIAN_IMAGE_DATE="2020-02-13"
+RASPIOS_DIR_DATE="2024-03-15"
+RASPIOS_IMAGE_DATE="2024-03-15"
 
-RASPBIAN_IMAGE="${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.zip"
-RASPBIAN_SHA256="${RASPBIAN_IMAGE_DATE}-raspbian-buster-lite.zip.sha256"
-RASPBIAN_BASE_URL="https://downloads.raspberrypi.org/raspbian_lite/images/raspbian_lite-${RASPBIAN_DIR_DATE}"
+RASPIOS_IMAGE="${RASPIOS_IMAGE_DATE}-raspios-bookworm-arm64-lite.img.xz"
+RASPIOS_SHA256="${RASPIOS_IMAGE_DATE}-raspios-bookworm-arm64-lite.img.xz.sha256"
+RASPIOS_BASE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-${RASPIOS_DIR_DATE}"
 
-(cd $IMAGE_SOURCE_DIR && curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_IMAGE})
-(cd $IMAGE_SOURCE_DIR && curl -O ${RASPBIAN_BASE_URL}/${RASPBIAN_SHA256})
+(cd $IMAGE_SOURCE_DIR && curl -O ${RASPIOS_BASE_URL}/${RASPIOS_IMAGE})
+(cd $IMAGE_SOURCE_DIR && curl -O ${RASPIOS_BASE_URL}/${RASPIOS_SHA256})
 
-SHA_FILE="${IMAGE_SOURCE_DIR}/${RASPBIAN_SHA256}"
-IMAGE_FILE="${IMAGE_SOURCE_DIR}/${RASPBIAN_IMAGE}"
+SHA_FILE="${IMAGE_SOURCE_DIR}/${RASPIOS_SHA256}"
+IMAGE_FILE="${IMAGE_SOURCE_DIR}/${RASPIOS_IMAGE}"
 
 cat $SHA_FILE
 
@@ -23,7 +23,7 @@ CHECKSUM=$(awk '{ print $1 }' ${SHA_FILE}) && \
     cat checksum.txt && \
     sha256sum -c checksum.txt
 
-unzip ${IMAGE_FILE} -d ${IMAGE_SOURCE_DIR}
+xz -d ${IMAGE_FILE}
 
 rm -f ${IMAGE_FILE} ${SHA_FILE} checksum.txt
 

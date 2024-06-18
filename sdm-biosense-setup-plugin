@@ -1,4 +1,7 @@
 #!/bin/bash
+
+echo "Starting sdm-biosense-setup-plugin..."
+
 #
 # Example from https://github.com/gitbls/sdm/blob/master/Docs/Example-Plugin.md
 #
@@ -164,4 +167,7 @@ else
     logfreespace "at end of $pfx Custom Phase post-install"
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
+
+echo "done."
+
 exit 0

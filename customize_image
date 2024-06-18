@@ -127,6 +127,7 @@ docker build -t "$DOCKER_IMAGE_NAME" .
 docker run --privileged -it --rm -v .:/home/agent/hostdir -v /dev:/dev "$DOCKER_IMAGE_NAME" /bin/bash -v -c "
 sudo sdm \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
+    --plugin-debug \
     --autologin \
     --expand-root \
     --regen-ssh-host-keys \
