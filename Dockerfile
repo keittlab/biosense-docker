@@ -8,6 +8,7 @@ RUN apt-get update && apt-get -y full-upgrade
 RUN apt-get update && apt-get install -y \
     sudo \
     curl \
+    wget \
     unzip \
     fdisk \
     dosfstools \

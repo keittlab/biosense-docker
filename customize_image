@@ -2,139 +2,102 @@
 
 IMAGE_SOURCE_DIR="source_images"
 IMAGE_DEST_DIR="customized_images"
+OVERWRITE=0
 
-choose_file() {
-    local dir=$1
-    if [[ ! -d $dir ]]; then
-        echo "Directory does not exist."
-        return 1
-    fi
-
-    local files=("$dir"/*)
-    if [[ ${#files[@]} -eq 0 ]]; then
-        echo "No files found in directory."
-        return 1
-    fi
-
-    echo
-    echo "Please choose a file from the following list:"
-    echo
-    for i in "${!files[@]}"; do
-        echo "$((i + 1))) ${files[i]}"
-    done
-    echo
-
-    while true; do
-        read -p "Enter the number of the file you want to choose: " choice
-        if [[ $choice -gt 0 && $choice -le ${#files[@]} ]]; then
-            echo
-            echo "You have chosen: ${files[$((choice - 1))]}"
-            echo
-            IMAGE_FILE="${files[$((choice - 1))]}"
-            return 0
-        else
-            return 1
-        fi
-    done
+# Function to display usage information
+usage() {
+    echo "Usage: $0 -f <image_file> -h <hostname> [-o]"
+    echo "  -f <image_file>  : Path to the source image file."
+    echo "  -h <hostname>    : Hostname for the customized image."
+    echo "  -o               : Overwrite the customized image file if it exists."
+    exit 1
 }
 
-# Usage example:
-choose_file "./source_images"
-if [[ $? -ne 0 ]]; then
-    echo
-    echo "Invalid choice."
-    echo
+# Parse command line arguments
+while getopts ":f:h:o" opt; do
+    case ${opt} in
+        f )
+            IMAGE_FILE=$OPTARG
+            ;;
+        h )
+            IMAGE_HOSTNAME=$OPTARG
+            ;;
+        o )
+            OVERWRITE=1
+            ;;
+        \? )
+            echo "Invalid option: $OPTARG" 1>&2
+            usage
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            usage
+            ;;
+    esac
+done
+
+shift $((OPTIND -1))
+
+# Validate input parameters
+if [[ -z "${IMAGE_FILE}" ]] || [[ -z "${IMAGE_HOSTNAME}" ]]; then
+    echo "Both image file and hostname are required."
+    usage
+fi
+
+# Check if the image file exists
+if [[ ! -f "${IMAGE_FILE}" ]]; then
+    echo "Image file does not exist."
     exit 1
 fi
 
-# Function to query the user for a hostname
-query_hostname() {
-    local hostname_regex="^([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)$"
+# Validate the hostname
+hostname_regex="^([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)$"
+if [[ ! ${IMAGE_HOSTNAME} =~ ${hostname_regex} ]] || [[ ${#IMAGE_HOSTNAME} -lt 1 ]] || [[ ${#IMAGE_HOSTNAME} -gt 253 ]]; then
+    echo "Invalid hostname. A valid hostname consists of alphanumeric characters and hyphens, and must start and end with an alphanumeric character."
+    exit 1
+fi
 
-    while true; do
-        read -p "Enter a hostname: " hostname
-
-        # Check if the hostname is valid
-        if [[ ${#hostname} -ge 1 && ${#hostname} -le 253 && $hostname =~ $hostname_regex ]]; then
-            IMAGE_HOSTNAME="$hostname"
-            return 0
-        else
-            echo ""
-            echo "Invalid hostname. Please try again."
-            echo "A valid hostname consists of alphanumeric characters and hyphens, and must start and end with an alphanumeric character."
-            echo ""
-        fi
-    done
-}
-
-query_hostname
 echo ""
+echo "Using image file: ${IMAGE_FILE}"
 echo "Using hostname: ${IMAGE_HOSTNAME}"
 echo ""
 
-IMAGE_FILE_BASE=$(basename "$IMAGE_FILE")
-
+IMAGE_FILE_BASE=$(basename "${IMAGE_FILE}")
 CUSTOMIZED_IMAGE_FILE="./${IMAGE_DEST_DIR}/${IMAGE_HOSTNAME}-${IMAGE_FILE_BASE}"
+CUSTOMIZED_IMAGE_FILE_BASE=$(basename "${CUSTOMIZED_IMAGE_FILE}")
 
-CUSTOMIZED_IMAGE_FILE_BASE=$(basename "$CUSTOMIZED_IMAGE_FILE")
-
-echo "Writing to $CUSTOMIZED_IMAGE_FILE_BASE"
+echo "Writing to ${CUSTOMIZED_IMAGE_FILE_BASE}"
 echo ""
 
 CONTAINER_IMAGE_FILE="./hostdir/${IMAGE_SOURCE_DIR}/${IMAGE_FILE_BASE}"
 CONTAINER_CUSTOMIZED_IMAGE_FILE="./hostdir/${IMAGE_DEST_DIR}/${CUSTOMIZED_IMAGE_FILE_BASE}"
 
-# Function to prompt user to remove the file
-prompt_rm_file() {
-    read -p "Do you want to overwrite $CUSTOMIZED_IMAGE_FILE_BASE? (y/n): " choice
-    echo ""
-
-    case "$choice" in
-        y|Y )
-            echo "Removing file: $CUSTOMIZED_IMAGE_FILE"
-            echo ""
-            rm -f "$CUSTOMIZED_IMAGE_FILE"
-            echo "File removed."
-            echo ""
-            ;;
-        n|N )
-            echo "File not removed. Exiting."
-            echo ""
-            exit 1
-            ;;
-        * )
-            echo "Invalid choice. Please enter y or n."
-            echo ""
-            prompt_rm_file  # Recursively prompt again on invalid input
-            ;;
-    esac
-}
-
-if [ -f "$CUSTOMIZED_IMAGE_FILE" ]; then
-    prompt_rm_file
+# Check if the customized image file exists
+if [[ -f "${CUSTOMIZED_IMAGE_FILE}" ]]; then
+    if [[ ${OVERWRITE} -eq 1 ]]; then
+        echo "Overwriting existing file: ${CUSTOMIZED_IMAGE_FILE}"
+        cp -a -f "${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+    else
+        echo "Customized image file already exists and overwrite option not set. Exiting."
+        exit 1
+    fi
+else
+    cp -a -f "${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
 fi
 
 DOCKER_IMAGE_NAME="biosense-sdm"
 
-docker build -t "$DOCKER_IMAGE_NAME" .
+docker build -t "${DOCKER_IMAGE_NAME}" .
 
-# disable fake-hwclock? tiggerhappy?
-# enable trim?
-# need to set firewall rules
-# setup automatic timezone discovery
-
-# Some of these are from instructions in the biosense github repo
-docker run --privileged -it --rm -v .:/home/agent/hostdir -v /dev:/dev "$DOCKER_IMAGE_NAME" /bin/bash -v -c "
+docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "
 sudo sdm \
+    --customize \
+    --chroot \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
-    --plugin-debug \
     --autologin \
-    --expand-root \
     --regen-ssh-host-keys \
-    --hostname $IMAGE_HOSTNAME \
-    --burnfile $CONTAINER_CUSTOMIZED_IMAGE_FILE \
-    $CONTAINER_IMAGE_FILE
+    --hostname ${IMAGE_HOSTNAME} \
+    ${CONTAINER_CUSTOMIZED_IMAGE_FILE}
 "
 
-    
-
+exit 0

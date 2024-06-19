@@ -1,6 +1,11 @@
 #!/bin/bash
 
-echo "Starting sdm-biosense-setup-plugin..."
+# disable fake-hwclock? tiggerhappy?
+# enable trim?
+# need to set firewall rules
+# setup automatic timezone discovery
+
+# Some of these are from instructions in the biosense github repo
 
 #
 # Example from https://github.com/gitbls/sdm/blob/master/Docs/Example-Plugin.md
@@ -127,25 +132,25 @@ else
     # sed -i "s/ext4    defaults,noatime/ext4    defaults,noatime,commit=300/" /etc/fstab
 
     # This needs work -- exceptions
-    logtoboth `python3 -c '
+    # logtoboth `python3 -c '
 
-    import board
-    import digitalio
-    import busio
+    # import board
+    # import digitalio
+    # import busio
 
-    # Try to great a Digital input
-    pin = digitalio.DigitalInOut(board.D4)
-    print("Digital IO ok!")
+    # # Try to great a Digital input
+    # pin = digitalio.DigitalInOut(board.D4)
+    # print("Digital IO ok!")
 
-    # Try to create an I2C device
-    i2c = busio.I2C(board.SCL, board.SDA)
-    print("I2C ok!")
+    # # Try to create an I2C device
+    # i2c = busio.I2C(board.SCL, board.SDA)
+    # print("I2C ok!")
 
-    # Try to create an SPI device
-    spi = busio.SPI(board.SCLK, board.MOSI, board.MISO)
-    print("SPI ok!")
+    # # Try to create an SPI device
+    # spi = busio.SPI(board.SCLK, board.MOSI, board.MISO)
+    # print("SPI ok!")
 
-    '`
+    # '`
 
     SOUND_FILE=/tmp/test.wav
     HWDEVICE=`echo "$(arecord -l |grep 'card.*USB' | sed 's/.*card //' | cut -d " " -f 1|cut -c 1),$(arecord -l |grep 'card.*USB' | sed 's/.*device //' | cut -d " " -f 1|cut -c 1)"`
