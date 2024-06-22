@@ -1,29 +1,18 @@
 #!/bin/bash
 
-# disable fake-hwclock? tiggerhappy?
-# enable trim?
-# need to set firewall rules
-# setup automatic timezone discovery
-
-# Some of these are from instructions in the biosense github repo
-
-#
-# Example from https://github.com/gitbls/sdm/blob/master/Docs/Example-Plugin.md
-#
+# Load SDM parameters
 function loadparams() {
     source $SDMPT/etc/sdm/sdm-readparams
 }
-#
-# $1 is the phase: "0", "1", or "post-install"
-#
+
+# Get the phase (0, 1, or post-install) and arguments
 phase=$1
 pfx="$(basename $0)"
 args="$2"
 vldargs=""
 loadparams
 
-if [ "$phase" == "0" ]
-then
+if [ "$phase" == "0" ]; then
     #
     # In Phase 0 all references to directories in the image
     # must be preceded by $SDMPT
@@ -31,80 +20,42 @@ then
     logtoboth "* Plugin $pfx: Start Phase 0"
     logfreespace "at start of $pfx Phase 0"
     plugin_getargs $pfx "$args" "$vldargs"
-    #
-    # Print the keys found (example usage). plugin_getargs returns the list of found keys in $foundkeys
-    #
-    # plugin_printkeys
-    #plugin_dbgprint "This is how to do a Plugin Debug printout"      # Will only be printed if --plugin-debug specified
-    # logtoboth "> Plugin $pfx: Create NFS environment"
-    # for f in h k l rpi ssd
-    # do
-	# [ ! -d $SDMPT/$f ] && mkdir $SDMPT/$f
-    # done
-    
-    # echo "#/        192.168.92.0/24(rw,no_root_squash,no_subtree_check,insecure)" >> $SDMPT/etc/.my-exports
-    
-    # logtoboth "> Plugin $pfx: Copy /usr/local/bin scripts"
-    # for f in \
-	# ddpizip \
-	#     wlanset \
-	#     btset \
-	#     xdmset \
-	#     tman
-    # do
-    #     cp -f $csrc/local/$f $SDMPT/usr/local/bin
-    # done
 
-    # if [ "$myuser" != "" ]
-    # then
-	# logtoboth "> Plugin $pfx: Copy $myuser login files to $SDMPT/home/$myuser"
-	# [ ! -d $SDMPT/home/$myuser ] && mkdir $SDMPT/home/$myuser
-	# cp -f $csrc/home/$myuser/{.bashrc,.colordiffrc,.dircolors,.emacs,.inputrc,.vimrc,.Xmodmap,.Xdefaults,.tmux.conf} $SDMPT/home/$myuser
-	# echo "source /home/$myuser/.bashrc" > $SDMPT/home/$myuser/.bash_profile
-	# chmod 755 $SDMPT/home/$myuser/.bash_profile
-	# [ ! -d $SDMPT/home/$myuser/bin ] && mkdir $SDMPT/home/$myuser/bin
-	# for fd in .icewm \
-	# 	      .lftp \
-	# 	      .ncftp
-	# do
-	#     [ -d $csrc/home/$myuser/$fd ] && cp -a -f $csrc/home/$myuser/$fd $SDMPT/home/$myuser/$fd
-	# done
-	
-	# logtoboth "> Plugin $pfx: Copy $csrc/home/bls/ssh-mydomain to $SDMPT/home/$myuser"
-	# cp -a $csrc/home/bls/ssh-mydomain $SDMPT/home/$myuser/.ssh
-	# chmod 700 $SDMPT/home/$myuser/.ssh
+    # Use rsync to copy all scripts from biosense-scripts directory to /usr/local/bin in the image
+    logtoboth "Copying biosense scripts to $SDMPT/usr/local/bin using rsync"
+    mkdir -p $SDMPT/usr/local/bin
+    rsync -av --chown=root:root --chmod=755 /home/agent/hostdir/biosense-scripts/ $SDMPT/usr/local/bin/
 
-	# logtoboth "> Plugin $pfx: Copy login scripts to $SDMPT/root"
-	# [ ! -d $SDMPT/root/orig ] && mkdir $SDMPT/root/orig && mv $SDMPT/root/.bashrc $SDMPT/root/orig
-	# [ -f $SDMPT/root/.bash_profile ] && mv $SDMPT/root/.bash_profile $SDMPT/root/orig
-	# cp $csrc/home/${myuser}/{.bashrc,.colordiffrc,.dircolors,.emacs,.inputrc,.tmux.conf} $SDMPT/root
-	# echo "source /root/.bashrc" > $SDMPT/root/.bash_profile
-	# chmod 755 $SDMPT/root/.bash_profile
-	# cp -a $SDMPT/home/$myuser/.ssh $SDMPT/root/.ssh
-	# chown -R root.root $SDMPT/root/.ssh
-    # fi
-    
+    logtoboth "Creating directory for SSH retry"
+    mkdir -p $SDMPT/var/lib/ssh-retry
+    chmod 0755 $SDMPT/var/lib/ssh-retry
+
+    # Copy SSH retry service file to the image
+    logtoboth "Copying SSH retry service file to $SDMPT/etc/systemd/system/ssh-retry.service"
+    cp /home/agent/hostdir/biosense-config-files/ssh-retry.service $SDMPT/etc/systemd/system/ssh-retry.service
+    chmod 0644 $SDMPT/etc/systemd/system/ssh-retry.service
+
+    # Copy remove SSH success file service to the image
+    logtoboth "Copying remove SSH success file service to $SDMPT/etc/systemd/system/remove-ssh-success.service"
+    cp /home/agent/hostdir/biosense-config-files/remove-ssh-success.service $SDMPT/etc/systemd/system/remove-ssh-success.service
+    chmod 0644 $SDMPT/etc/systemd/system/remove-ssh-success.service
+
+    # Copy WireGuard key generation service file to the image
+    logtoboth "Copying WireGuard key generation service file to $SDMPT/etc/systemd/system/wg-keygen.service"
+    cp /home/agent/hostdir/biosense-config-files/wg-keygen.service $SDMPT/etc/systemd/system/wg-keygen.service
+    chmod 0644 $SDMPT/etc/systemd/system/wg-keygen.service
+
     logfreespace "at end of $pfx Phase 0"
     logtoboth "* Plugin $pfx: Complete Phase 0"
 
-elif [ "$phase" == "1" ]
-then
+elif [ "$phase" == "1" ]; then
     #
     # Phase 1 (in nspawn)
-    #
-    # In Phase 1 all references to directories in the image can be direct
     #
     logtoboth "* Plugin $pfx: Phase 1"
     plugin_getargs $pfx "$args" "$vldargs"
     logfreespace "at start of $pfx Phase 1"
     
-    # logtoboth "> Plugin $pfx: Disable $SDMPT/etc/profile.d/wifi-check.sh and sshpwd.sh"
-    # [ -f $SDMPT/etc/profile.d/wifi-check.sh ] && mv $SDMPT/etc/profile.d/wifi-check.sh $SDMPT/etc/profile.d/.sdm.wifi-check.sh
-    # [ -f $SDMPT/etc/profile.d/sshpwd.sh ] &&     mv $SDMPT/etc/profile.d/sshpwd.sh $SDMPT/etc/profile.d/.sdm.sshpwd.sh
-    
-    # logtoboth "> Plugin $pfx: Set APT::Install-Recommends to false"
-    # echo "APT::Install-Recommends \"false\";" >> /etc/apt/apt.conf.d/03-norecommends
-
     # Since we have autologin, this will set an autologout 
     # This gives you 10 minutes to access the system after reboot
     # This will help with lost password, although it does give
@@ -116,63 +67,41 @@ then
     chmod +x /etc/profile.d/autologout.sh && \
     logtoboth "Automatic shell logout set to 10 minutes."
 
-    logfreespace "at end of $pfx Phase 1"
-    logtoboth "* Plugin $pfx: Phase 1 completed"
-else
-    #
-    # Post-install edits
-    #
-    logtoboth "* Plugin $pfx: Phase post-install"
-    plugin_getargs $pfx "$args" ""
-    logfreespace "at start of $pfx Phase post-install"
-    #
-    # Set fstab ext4 partition to a higher commit
-    #
-    # logtoboth "> Plugin $pfx: Set ext4 partition commit higher"
-    # sed -i "s/ext4    defaults,noatime/ext4    defaults,noatime,commit=300/" /etc/fstab
-
-    # This needs work -- exceptions
-    # logtoboth `python3 -c '
-
-    # import board
-    # import digitalio
-    # import busio
-
-    # # Try to great a Digital input
-    # pin = digitalio.DigitalInOut(board.D4)
-    # print("Digital IO ok!")
-
-    # # Try to create an I2C device
-    # i2c = busio.I2C(board.SCL, board.SDA)
-    # print("I2C ok!")
-
-    # # Try to create an SPI device
-    # spi = busio.SPI(board.SCLK, board.MOSI, board.MISO)
-    # print("SPI ok!")
-
-    # '`
-
-    SOUND_FILE=/tmp/test.wav
-    HWDEVICE=`echo "$(arecord -l |grep 'card.*USB' | sed 's/.*card //' | cut -d " " -f 1|cut -c 1),$(arecord -l |grep 'card.*USB' | sed 's/.*device //' | cut -d " " -f 1|cut -c 1)"`
-    /usr/bin/arecord --duration=1 --format=cd --file-type=wav --device=hw:$HWDEVICE $SOUND_FILE
-    if [ -f "$SOUND_FILE" ]
-    then
-        logtoboth "Succesfully recorded sound."
-        rm -f $SOUND_FILE
-    else
-        logtoboth "Sound recording failed."
-    fi
-
     # Install public key from keittlab server
     mkdir -p /home/biosense/.ssh
     chmod 0700 /home/biosense/.ssh
     echo 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC+5tC93v9JHMDXaJp6U3DqW99Mk9SyelAmfl9ZBujtXoo/eLdwzyj+gPWzGo8s7zTtUxLV4XD+8g0kBMZUq9/2XJ1VPfgT5vXjS4+y5amLLjkf/TjLhUctRR6ANXkqwEt/c5HH1J28TvJrJzv3lykjEsTwsiESs58w4fAV6QyXTgL2uBnjp3B04YwFDR+GLcYIeOohI94Ps2HX3EV7j/iqRZz40TasZEpp7xO7GpnFFRkL5TB4vLJayb5evQ/+b2GAc6pzlCRQmTSZwkRmq/wMgUlmyuKNiqYzeTBZhmcqWnkanAq2qBYMgzhspsM9/LdBs+jEQFgf1yT+yMRxxkntN1nnZKXewgsu25QBCf2Dvg/IPAonc4+ZheHu7aaNcdl9fl9glr0azMpoEYvCLnuRJLzyDWxPfJIXQ/Rh+J9YqfMmu3NnnShfgeopMfXs/JwOobd8SExHKqjdNOyzb3Bpe2V/1aq7IH5dbX1xMajeH6L7oJM7799PATeB5aGuedE= biosense@geo' > /home/biosense/.ssh/authorized_keys
     chmod 0600 /home/biosense/.ssh/authorized_keys
 
+    logfreespace "at end of $pfx Phase 1"
+    logtoboth "* Plugin $pfx: Phase 1 completed"
+
+elif [ "$phase" == "post-install" ]; then
+    #
+    # Post-install edits
+    #
+    logtoboth "* Plugin $pfx: Phase post-install"
+    plugin_getargs $pfx "$args" ""
+    logfreespace "at start of $pfx Phase post-install"
+
+    # Enable and start the SSH retry service
+    logtoboth "Enabling and starting SSH retry service"
+    systemctl enable ssh-retry.service
+    systemctl start ssh-retry.service
+
+    # Enable and start the remove SSH success file service
+    logtoboth "Enabling and starting remove SSH success file service"
+    systemctl enable remove-ssh-success.service
+    systemctl start remove-ssh-success.service
+
+    # Enable and start the WireGuard key generation service
+    logtoboth "Enabling and starting WireGuard key generation service"
+    systemctl enable wg-keygen.service
+    systemctl start wg-keygen.service
+
     logfreespace "at end of $pfx Custom Phase post-install"
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
 
 echo "done."
-
 exit 0

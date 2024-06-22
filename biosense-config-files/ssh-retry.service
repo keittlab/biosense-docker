@@ -1,0 +1,14 @@
+[Unit]
+Description=SSH Retry Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ssh-retry.sh
+User=biosense  # Specify the user to run the script
+Type=simple
+Restart=on-failure
+ExecStopPost=/bin/sh -c 'if [ -f /var/lib/ssh-retry/ssh_success ]; then systemctl stop ssh-retry.service; fi'
+
+[Install]
+WantedBy=multi-user.target

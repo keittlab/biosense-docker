@@ -6,18 +6,26 @@ user:"adduser=biosense|password=biosense"
 apps:"apps=wireguard"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#disables
 # disable the startup configuration wizard
-disables:piwiz
+# disables:piwiz
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#btwifiset
 # btwifiset:"country=US"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#bootconfig
 bootconfig:"dtoverlay=i2c-rtc,ds3231"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#l10n
-L10n:"keymap=us|locale=en_US.UTF-8|timezone=Americas/Chicago"
+# L10n:"keymap=us|locale=en_US.UTF-8|timezone=Americas/Chicago"
+# https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#copydir
+# copydir:"from=biosense-scripts/|to=/usr/local/bin"
 # Directories for data to send and data to hold
-mkdir:"dir=/home/biosense/dataqueue|chown=biosense|chmod=755"
-mkdir:"dir=/home/biosense/datastore|chown=biosense|chmod=755"
+mkdir:"dir=/home/biosense/dataqueue|chown=biosense|chmod=0755"
+mkdir:"dir=/home/biosense/datastore|chown=biosense|chmod=0755"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#imon
 # imon
+# System plugin
+#system:"name=s1|cron-d=/path/to/crondscript|exports=/path/to/e1,/path/to/e2"
+#system:"name=s2|fstab=myfstab"
+#system:"name=s1|systemd-config=system=biosense-config-files/remove-ssh-success.service"
+#system:"name=s2|systemd-config=system=biosense-config-files/ssh-retry.service"
 # Custom plugin
 sdm-biosense-setup-plugin
+
 

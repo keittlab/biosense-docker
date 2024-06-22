@@ -1,0 +1,11 @@
+[Unit]
+Description=Generate WireGuard keys if not present
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wg-keygen.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
