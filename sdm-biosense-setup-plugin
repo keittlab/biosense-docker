@@ -21,29 +21,12 @@ if [ "$phase" == "0" ]; then
     logfreespace "at start of $pfx Phase 0"
     plugin_getargs $pfx "$args" "$vldargs"
 
-    # Use rsync to copy all scripts from biosense-scripts directory to /usr/local/bin in the image
-    logtoboth "Copying biosense scripts to $SDMPT/usr/local/bin using rsync"
-    mkdir -p $SDMPT/usr/local/bin
-    rsync -av --chown=root:root --chmod=755 /home/agent/hostdir/biosense-scripts/ $SDMPT/usr/local/bin/
-
     logtoboth "Creating directory for SSH retry"
     mkdir -p $SDMPT/var/lib/ssh-retry
     chmod 0755 $SDMPT/var/lib/ssh-retry
 
-    # Copy SSH retry service file to the image
-    logtoboth "Copying SSH retry service file to $SDMPT/etc/systemd/system/ssh-retry.service"
-    cp /home/agent/hostdir/biosense-config-files/ssh-retry.service $SDMPT/etc/systemd/system/ssh-retry.service
-    chmod 0644 $SDMPT/etc/systemd/system/ssh-retry.service
-
-    # Copy remove SSH success file service to the image
-    logtoboth "Copying remove SSH success file service to $SDMPT/etc/systemd/system/remove-ssh-success.service"
-    cp /home/agent/hostdir/biosense-config-files/remove-ssh-success.service $SDMPT/etc/systemd/system/remove-ssh-success.service
-    chmod 0644 $SDMPT/etc/systemd/system/remove-ssh-success.service
-
-    # Copy WireGuard key generation service file to the image
-    logtoboth "Copying WireGuard key generation service file to $SDMPT/etc/systemd/system/wg-keygen.service"
-    cp /home/agent/hostdir/biosense-config-files/wg-keygen.service $SDMPT/etc/systemd/system/wg-keygen.service
-    chmod 0644 $SDMPT/etc/systemd/system/wg-keygen.service
+    SYS_SERVICE_DIR=/lib/systemd/system
+    ETC_SERVICE_DIR=/etc/systemd/system
 
     logfreespace "at end of $pfx Phase 0"
     logtoboth "* Plugin $pfx: Complete Phase 0"
@@ -67,11 +50,7 @@ elif [ "$phase" == "1" ]; then
     chmod +x /etc/profile.d/autologout.sh && \
     logtoboth "Automatic shell logout set to 10 minutes."
 
-    # Install public key from keittlab server
-    mkdir -p /home/biosense/.ssh
-    chmod 0700 /home/biosense/.ssh
-    echo 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC+5tC93v9JHMDXaJp6U3DqW99Mk9SyelAmfl9ZBujtXoo/eLdwzyj+gPWzGo8s7zTtUxLV4XD+8g0kBMZUq9/2XJ1VPfgT5vXjS4+y5amLLjkf/TjLhUctRR6ANXkqwEt/c5HH1J28TvJrJzv3lykjEsTwsiESs58w4fAV6QyXTgL2uBnjp3B04YwFDR+GLcYIeOohI94Ps2HX3EV7j/iqRZz40TasZEpp7xO7GpnFFRkL5TB4vLJayb5evQ/+b2GAc6pzlCRQmTSZwkRmq/wMgUlmyuKNiqYzeTBZhmcqWnkanAq2qBYMgzhspsM9/LdBs+jEQFgf1yT+yMRxxkntN1nnZKXewgsu25QBCf2Dvg/IPAonc4+ZheHu7aaNcdl9fl9glr0azMpoEYvCLnuRJLzyDWxPfJIXQ/Rh+J9YqfMmu3NnnShfgeopMfXs/JwOobd8SExHKqjdNOyzb3Bpe2V/1aq7IH5dbX1xMajeH6L7oJM7799PATeB5aGuedE= biosense@geo' > /home/biosense/.ssh/authorized_keys
-    chmod 0600 /home/biosense/.ssh/authorized_keys
+    # Need to assign strong password to biosense account
 
     logfreespace "at end of $pfx Phase 1"
     logtoboth "* Plugin $pfx: Phase 1 completed"
@@ -84,6 +63,14 @@ elif [ "$phase" == "post-install" ]; then
     plugin_getargs $pfx "$args" ""
     logfreespace "at start of $pfx Phase post-install"
 
+   # Reload systemd manager configuration
+    systemctl daemon-reload
+
+    # Enable and start the WireGuard key generation service
+    logtoboth "Enabling and starting WireGuard key generation service"
+    systemctl enable wg-keygen.service
+    systemctl start wg-keygen.service
+
     # Enable and start the SSH retry service
     logtoboth "Enabling and starting SSH retry service"
     systemctl enable ssh-retry.service
@@ -93,11 +80,6 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "Enabling and starting remove SSH success file service"
     systemctl enable remove-ssh-success.service
     systemctl start remove-ssh-success.service
-
-    # Enable and start the WireGuard key generation service
-    logtoboth "Enabling and starting WireGuard key generation service"
-    systemctl enable wg-keygen.service
-    systemctl start wg-keygen.service
 
     logfreespace "at end of $pfx Custom Phase post-install"
     logtoboth "* Plugin $pfx: Phase post-install Completed"

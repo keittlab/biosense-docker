@@ -6,6 +6,7 @@ PRIVATE_KEY="/home/biosense/.ssh/temporary_private_key"
 RETRY_INTERVAL=60  # Time in seconds between retry attempts
 SUCCESS_FILE="/var/lib/ssh-retry/ssh_success"
 WIREGUARD_PUBLIC_KEY="/etc/wireguard/publickey"  # Adjust the path if necessary
+HOSTNAME=$(hostname)
 
 # Function to perform actions after successful SSH connection
 on_success() {
@@ -25,15 +26,17 @@ on_success() {
     
     # Send the WireGuard public key to the server
     echo "Sending WireGuard public key to server..."
-    scp -i ${PRIVATE_KEY} ${WIREGUARD_PUBLIC_KEY} ${SERVER_USER}@${SERVER_IP}:/home/biosense_restricted/wireguard_keys
+    cp -a ${WIREGUARD_PUBLIC_KEY} /tmp/${HOSTNAME}_wg
+    scp -i ${PRIVATE_KEY} /tmp/${HOSTNAME}_wg ${SERVER_USER}@${SERVER_IP}:/home/biosense_restricted/wireguard_keys/
     
     if [ $? -eq 0 ]; then
         echo "WireGuard public key sent successfully."
         
-        # Remove the private key
+        # Remove the private key 
         rm -f ${PRIVATE_KEY}
     else
         echo "Failed to send WireGuard public key. Retrying..."
+        sleep ${RETRY_INTERVAL}
         return 1
     fi
 
@@ -42,8 +45,11 @@ on_success() {
 
 while [ -f "${PRIVATE_KEY}" ]; do
     echo "Attempting to connect to SSH server..."
-    ssh -i ${PRIVATE_KEY} -o ConnectTimeout=10 -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} "exit"
+    ssh -i ${PRIVATE_KEY} -o ConnectTimeout=10 -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} "true"
+    
     if [ $? -eq 0 ]; then
+        echo "SSH connection command succeeded"
+        sleep 1  # Allow some time for the connection to settle
         on_success
     else
         echo "SSH connection failed. Retrying in ${RETRY_INTERVAL} seconds..."
