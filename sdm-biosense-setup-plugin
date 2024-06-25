@@ -21,13 +21,6 @@ if [ "$phase" == "0" ]; then
     logfreespace "at start of $pfx Phase 0"
     plugin_getargs $pfx "$args" "$vldargs"
 
-    logtoboth "Creating directory for SSH retry"
-    mkdir -p $SDMPT/var/lib/ssh-retry
-    chmod 0755 $SDMPT/var/lib/ssh-retry
-
-    SYS_SERVICE_DIR=/lib/systemd/system
-    ETC_SERVICE_DIR=/etc/systemd/system
-
     logfreespace "at end of $pfx Phase 0"
     logtoboth "* Plugin $pfx: Complete Phase 0"
 
@@ -62,24 +55,6 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "* Plugin $pfx: Phase post-install"
     plugin_getargs $pfx "$args" ""
     logfreespace "at start of $pfx Phase post-install"
-
-   # Reload systemd manager configuration
-    systemctl daemon-reload
-
-    # Enable and start the WireGuard key generation service
-    logtoboth "Enabling and starting WireGuard key generation service"
-    systemctl enable wg-keygen.service
-    systemctl start wg-keygen.service
-
-    # Enable and start the SSH retry service
-    logtoboth "Enabling and starting SSH retry service"
-    systemctl enable ssh-retry.service
-    systemctl start ssh-retry.service
-
-    # Enable and start the remove SSH success file service
-    logtoboth "Enabling and starting remove SSH success file service"
-    systemctl enable remove-ssh-success.service
-    systemctl start remove-ssh-success.service
 
     logfreespace "at end of $pfx Custom Phase post-install"
     logtoboth "* Plugin $pfx: Phase post-install Completed"
