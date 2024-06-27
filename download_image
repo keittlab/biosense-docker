@@ -1,29 +1,174 @@
 #!/bin/bash
 
 IMAGE_SOURCE_DIR="source_images"
-IMAGE_DEST_DIR="customized_images"
+BASE_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/"
+INTERACTIVE=0
+TMP_DIR=$(mktemp -d)
 
-RASPIOS_DIR_DATE="2024-03-15"
-RASPIOS_IMAGE_DATE="2024-03-15"
+# Function to display usage information
+usage() {
+    echo "Usage: $0 [--interactive]"
+    echo "  --interactive : Interactive mode to choose from among the 10 most recent versions."
+    exit 1
+}
 
-RASPIOS_IMAGE="${RASPIOS_IMAGE_DATE}-raspios-bookworm-arm64-lite.img.xz"
-RASPIOS_SHA256="${RASPIOS_IMAGE_DATE}-raspios-bookworm-arm64-lite.img.xz.sha256"
-RASPIOS_BASE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-${RASPIOS_DIR_DATE}"
+# Cleanup function to remove temporary files and directory
+cleanup() {
+    rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
-(cd $IMAGE_SOURCE_DIR && curl -O ${RASPIOS_BASE_URL}/${RASPIOS_IMAGE})
-(cd $IMAGE_SOURCE_DIR && curl -O ${RASPIOS_BASE_URL}/${RASPIOS_SHA256})
+# Function to download the latest image
+download_latest_image() {
+    echo "Fetching the latest Raspberry Pi OS Lite image URL..."
+    LATEST_URL=$(curl -s "${BASE_URL}" | grep -o 'href="raspios_lite_armhf-[^"]*/"' | sort -r | head -n 1 | cut -d'"' -f2)
+    if [[ -z "$LATEST_URL" ]]; then
+        echo "Failed to fetch the latest image URL."
+        exit 1
+    fi
+    LATEST_IMAGE_URL="${BASE_URL}${LATEST_URL}$(curl -s "${BASE_URL}${LATEST_URL}" | grep -o '[^"]*.img.xz' | head -n 1)"
+    local tmp_xz="$TMP_DIR/latest-lite.img.xz"
+    local tmp_img="$TMP_DIR/latest-lite.img"
+    local dest_img="${IMAGE_SOURCE_DIR}/latest-lite.img"
 
-SHA_FILE="${IMAGE_SOURCE_DIR}/${RASPIOS_SHA256}"
-IMAGE_FILE="${IMAGE_SOURCE_DIR}/${RASPIOS_IMAGE}"
+    echo "Downloading the latest Raspberry Pi OS Lite image from $LATEST_IMAGE_URL..."
+    curl -L "$LATEST_IMAGE_URL" -o $tmp_xz
 
-cat $SHA_FILE
+    if file $tmp_xz | grep -q 'XZ compressed data'; then
+        check_integrity $tmp_xz $LATEST_URL
+        unxz $tmp_xz
+        IMAGE_FILE=$tmp_img
+    else
+        echo "Downloaded file is not an XZ compressed data."
+        exit 1
+    fi
 
-CHECKSUM=$(awk '{ print $1 }' ${SHA_FILE}) && \
-    echo "$CHECKSUM ${IMAGE_FILE}" > checksum.txt && \
-    cat checksum.txt && \
-    sha256sum -c checksum.txt
+    mv $IMAGE_FILE $dest_img
+    echo "Downloaded and extracted image: $dest_img"
+}
 
-xz -d ${IMAGE_FILE}
+# Function to fetch recent versions from the directory listing
+fetch_recent_versions() {
+    echo "Fetching the 10 most recent versions of Raspberry Pi OS Lite..."
+    RECENT_VERSIONS=$(curl -s $BASE_URL | grep -o 'raspios_lite_armhf-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}/' | sort -r | uniq | head -n 10)
 
-rm -f ${IMAGE_FILE} ${SHA_FILE} checksum.txt
+    if [[ -z "$RECENT_VERSIONS" ]]; then
+        echo "No recent versions found. Exiting."
+        exit 1
+    fi
 
+    VERSIONS_URLS=()
+    for version in $RECENT_VERSIONS; do
+        IMG_URL="${BASE_URL}${version}$(curl -s "${BASE_URL}${version}" | grep -o '[^"]*.img.xz' | head -n 1)"
+        VERSIONS_URLS+=("$IMG_URL")
+    done
+
+    # Extract dates for displaying to the user
+    RECENT_DATES=()
+    for version in "${VERSIONS_URLS[@]}"; do
+        RECENT_DATES+=("$(basename $(dirname $version))")
+    done
+}
+
+# Function to list and download recent versions
+download_interactive_image() {
+    fetch_recent_versions
+
+    echo "Please select a version to download:"
+    select date in "${RECENT_DATES[@]}"; do
+        if [[ -n "$date" ]]; then
+            for version in "${VERSIONS_URLS[@]}"; do
+                if [[ "$version" == *"$date"* ]]; then
+                    local tmp_xz="$TMP_DIR/${date}-lite.img.xz"
+                    local tmp_img="$TMP_DIR/${date}-lite.img"
+                    local dest_img="${IMAGE_SOURCE_DIR}/${date}-lite.img"
+
+                    echo "Downloading $version..."
+                    curl -L $version -o $tmp_xz
+                    if file $tmp_xz | grep -q 'XZ compressed data'; then
+                        check_integrity $tmp_xz $date
+                        unxz $tmp_xz
+                        IMAGE_FILE=$tmp_img
+                    else
+                        echo "Downloaded file is not an XZ compressed data."
+                        exit 1
+                    fi
+
+                    mv $IMAGE_FILE $dest_img
+                    echo "Downloaded and extracted image: $dest_img"
+                    break
+                fi
+            done
+            break
+        else
+            echo "Invalid selection. Please try again."
+        fi
+    done
+}
+
+# Function to check the integrity of the downloaded image
+check_integrity() {
+    local file=$1
+    local version=$2
+    local sha256_file=$(curl -s "${BASE_URL}${version}" | grep -o '[^"]*.img.xz.sha256' | head -n 1)
+    local sha256_url="${BASE_URL}${version}${sha256_file}"
+    local tmp_sha256="$TMP_DIR/$(basename $file).sha256"
+
+    echo "Checking integrity of the downloaded image..."
+    curl -L -o $tmp_sha256 $sha256_url
+
+    if [[ ! -f $tmp_sha256 ]]; then
+        echo "Failed to download SHA256 checksum file. Integrity check cannot be performed."
+        return
+    fi
+
+    local sha256_content=$(cat $tmp_sha256)
+    echo "SHA256 file content:"
+    echo "$sha256_content"
+
+    if ! grep -q "^[a-f0-9]\{64\}" <<< "$sha256_content"; then
+        echo "Invalid SHA256 checksum file content."
+        rm $tmp_sha256
+        return
+    fi
+
+    local expected_sha256=$(awk '{print $1}' <<< "$sha256_content")
+    local actual_sha256=$(shasum -a 256 $file | awk '{print $1}')
+
+    echo "Expected SHA256: $expected_sha256"
+    echo "Actual SHA256:   $actual_sha256"
+
+    if [[ "$expected_sha256" == "$actual_sha256" ]]; then
+        echo "Integrity check passed."
+    else
+        echo "Warning: Integrity check failed. The downloaded image may be corrupted."
+    fi
+
+    rm $tmp_sha256
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --interactive)
+            INTERACTIVE=1
+            ;;
+        *)
+            echo "Invalid option: $1" 1>&2
+            usage
+            ;;
+    esac
+    shift
+done
+
+# Ensure the source_images directory exists
+mkdir -p $IMAGE_SOURCE_DIR
+
+# Download the image based on the mode
+if [[ $INTERACTIVE -eq 1 ]]; then
+    download_interactive_image
+else
+    download_latest_image
+fi
+
+exit 0

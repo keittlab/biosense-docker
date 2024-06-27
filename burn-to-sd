@@ -1,0 +1,158 @@
+#!/bin/bash
+
+IMAGE_DEST_DIR="customized_images"
+DOCKER_IMAGE_NAME="biosense-sdm"
+AUTOLOGIN=0
+DEBUG=0
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 -f <customized_image_file> -h <hostname> -d <device> [--autologin] [--debug]"
+    echo "  -f <customized_image_file> : Path to the customized image file."
+    echo "  -h <hostname>              : Hostname for the burned image."
+    echo "  -d <device>                : Device path where the SD card is located."
+    echo "  --autologin                : Enable autologin for the burned image."
+    echo "  --debug                    : Echo commands before executing them."
+    exit 1
+}
+
+# Function to unmount the device
+unmount_device() {
+    local device=$1
+    echo "Unmounting device: ${device}"
+    diskutil unmountDisk ${device}
+    if [[ $? -ne 0 ]]; then
+        echo "Failed to unmount device: ${device}"
+        exit 1
+    fi
+}
+
+# Function to map the macOS device to a Docker-compatible device
+map_device() {
+    local device=$1
+    local dev_name=$(basename "${device}")
+    local container_devices
+
+    echo "Listing devices in the Docker container..."
+    container_devices=$(docker run --rm --privileged -v /dev:/dev $DOCKER_IMAGE_NAME sh -c "ls /dev")
+
+    echo "Available devices in Docker container:"
+    echo "${container_devices}"
+
+    if echo "${container_devices}" | grep -q "${dev_name}"; then
+        echo "/dev/${dev_name}"
+    else
+        echo "Unable to map device: ${device} to a container device"
+        return 1
+    fi
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -f)
+            CUSTOMIZED_IMAGE_FILE=$2
+            shift
+            ;;
+        -h)
+            IMAGE_HOSTNAME=$2
+            shift
+            ;;
+        -d)
+            DEVICE=$2
+            shift
+            ;;
+        --autologin)
+            AUTOLOGIN=1
+            ;;
+        --debug)
+            DEBUG=1
+            ;;
+        *)
+            echo "Invalid option: $1" 1>&2
+            usage
+            ;;
+    esac
+    shift
+done
+
+# Validate input parameters
+if [[ -z "${CUSTOMIZED_IMAGE_FILE}" ]] || [[ -z "${IMAGE_HOSTNAME}" ]] || [[ -z "${DEVICE}" ]]; then
+    echo "Customized image file, hostname, and device are required."
+    usage
+fi
+
+# Check if the customized image file exists
+if [[ ! -f "${CUSTOMIZED_IMAGE_FILE}" ]]; then
+    echo "Customized image file does not exist."
+    exit 1
+fi
+
+# Validate the hostname
+hostname_regex="^([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)$"
+if [[ ! ${IMAGE_HOSTNAME} =~ ${hostname_regex} ]] || [[ ${#IMAGE_HOSTNAME} -lt 1 ]] || [[ ${#IMAGE_HOSTNAME} -gt 253 ]]; then
+    echo "Invalid hostname. A valid hostname consists of alphanumeric characters and hyphens, and must start and end with an alphanumeric character."
+    exit 1
+fi
+
+# Ensure the device is a block device
+if [[ ! -b ${DEVICE} ]]; then
+    echo "Device path is not a valid block device: ${DEVICE}"
+    exit 1
+fi
+
+echo ""
+echo "Using customized image file: ${CUSTOMIZED_IMAGE_FILE}"
+echo "Using hostname: ${IMAGE_HOSTNAME}"
+echo "Using device: ${DEVICE}"
+echo ""
+
+# Unmount the device
+unmount_device ${DEVICE}
+
+# Ensure the customized image file is correctly referenced
+CUSTOMIZED_IMAGE_FILE_PATH="/home/agent/hostdir/${CUSTOMIZED_IMAGE_FILE}"
+if [[ ! -f "$(pwd)/${CUSTOMIZED_IMAGE_FILE}" ]]; then
+    echo "Customized image file does not exist at path: $(pwd)/${CUSTOMIZED_IMAGE_FILE}"
+    exit 1
+fi
+
+# Map the host device to the corresponding container device
+CONTAINER_DEVICE_PATH=$(map_device "${DEVICE}")
+if [[ $? -ne 0 ]]; then
+    echo "Error: Could not map device ${DEVICE} to a container device."
+    exit 1
+fi
+
+# Construct the sdm command
+SDM_COMMAND="sudo sdm --burn ${CONTAINER_DEVICE_PATH} --hostname ${IMAGE_HOSTNAME}"
+
+if [[ ${AUTOLOGIN} -eq 1 ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --autologin"
+fi
+
+SDM_COMMAND="${SDM_COMMAND} \
+    --expand-root \
+    --nowait-timesync \
+    ${CUSTOMIZED_IMAGE_FILE_PATH}"
+
+# Debugging output
+if [[ ${DEBUG} -eq 1 ]]; then
+    echo "Debug Mode: ON"
+    echo "CUSTOMIZED_IMAGE_FILE_PATH: ${CUSTOMIZED_IMAGE_FILE_PATH}"
+    echo "CONTAINER_DEVICE_PATH: ${CONTAINER_DEVICE_PATH}"
+    echo "SDM_COMMAND: ${SDM_COMMAND}"
+fi
+
+# Run the docker command with the constructed SDM command
+if [[ ${DEBUG} -eq 1 ]]; then
+    set -x
+fi
+
+docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"
+
+if [[ ${DEBUG} -eq 1 ]]; then
+    set +x
+fi
+
+exit 0

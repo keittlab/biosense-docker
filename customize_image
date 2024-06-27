@@ -8,18 +8,21 @@ DISABLE_BLUETOOTH=0
 DISABLE_TRIGGERHAPPY=0
 DEBUG=0
 APTCACHE=""
+HOSTNAME=""
+AUTOLOGIN=0
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 -f <image_file> -h <hostname> [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>]"
-    echo "  -f <image_file>    : Path to the source image file."
-    echo "  -h <hostname>      : Hostname for the customized image."
-    echo "  --overwrite        : Overwrite the customized image file if it exists."
-    echo "  --disable-wifi     : Disable WiFi in the customized image."
-    echo "  --disable-bluetooth: Disable Bluetooth in the customized image."
-    echo "  --disable-triggerhappy: Disable Triggerhappy in the customized image."
-    echo "  --debug            : Run sdm without --batch option."
-    echo "  --aptcache <cache_address> : Use the specified apt cache server."
+    echo "Usage: $0 -f <image_file> [--hostname <hostname>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>]"
+    echo "  -f <image_file>           : Path to the source image file."
+    echo "  --hostname <hostname>     : Set the hostname for the customized image."
+    echo "  --autologin               : Enable autologin for the customized image."
+    echo "  --overwrite               : Overwrite the customized image file if it exists."
+    echo "  --disable-wifi            : Disable WiFi in the customized image."
+    echo "  --disable-bluetooth       : Disable Bluetooth in the customized image."
+    echo "  --disable-triggerhappy    : Disable Triggerhappy in the customized image."
+    echo "  --debug                   : Run sdm without --batch option."
+    echo "  --aptcache <cache_address>: Use the specified apt cache server."
     exit 1
 }
 
@@ -30,9 +33,12 @@ while [[ "$#" -gt 0 ]]; do
             IMAGE_FILE=$2
             shift
             ;;
-        -h)
-            IMAGE_HOSTNAME=$2
+        --hostname)
+            HOSTNAME=$2
             shift
+            ;;
+        --autologin)
+            AUTOLOGIN=1
             ;;
         --overwrite)
             OVERWRITE=1
@@ -62,8 +68,8 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Validate input parameters
-if [[ -z "${IMAGE_FILE}" ]] || [[ -z "${IMAGE_HOSTNAME}" ]]; then
-    echo "Both image file and hostname are required."
+if [[ -z "${IMAGE_FILE}" ]]; then
+    echo "Image file is required."
     usage
 fi
 
@@ -73,20 +79,12 @@ if [[ ! -f "${IMAGE_FILE}" ]]; then
     exit 1
 fi
 
-# Validate the hostname
-hostname_regex="^([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)$"
-if [[ ! ${IMAGE_HOSTNAME} =~ ${hostname_regex} ]] || [[ ${#IMAGE_HOSTNAME} -lt 1 ]] || [[ ${#IMAGE_HOSTNAME} -gt 253 ]]; then
-    echo "Invalid hostname. A valid hostname consists of alphanumeric characters and hyphens, and must start and end with an alphanumeric character."
-    exit 1
-fi
-
 echo ""
 echo "Using image file: ${IMAGE_FILE}"
-echo "Using hostname: ${IMAGE_HOSTNAME}"
 echo ""
 
 IMAGE_FILE_BASE=$(basename "${IMAGE_FILE}")
-CUSTOMIZED_IMAGE_FILE="./${IMAGE_DEST_DIR}/${IMAGE_HOSTNAME}-${IMAGE_FILE_BASE}"
+CUSTOMIZED_IMAGE_FILE="./${IMAGE_DEST_DIR}/${IMAGE_FILE_BASE}"
 CUSTOMIZED_IMAGE_FILE_BASE=$(basename "${CUSTOMIZED_IMAGE_FILE}")
 
 echo "Writing to ${CUSTOMIZED_IMAGE_FILE_BASE}"
@@ -125,7 +123,7 @@ if [[ ${DISABLE_TRIGGERHAPPY} -eq 1 ]]; then
 fi
 
 # Construct the sdm command
-SDM_COMMAND="sudo sdm --customize"
+SDM_COMMAND="sudo sdm --customize --extend --xmb 512"
 if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
 fi
@@ -133,18 +131,21 @@ fi
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     --plugin disables:\"${DISABLES}\" \
-    --plugin @/home/agent/hostdir/sdm-plugin-commands \
-    --autologin"
+    --plugin @/home/agent/hostdir/sdm-plugin-commands"
 
 if [[ -n "${APTCACHE}" ]]; then
     SDM_COMMAND="${SDM_COMMAND} --aptcache ${APTCACHE}"
 fi
 
+if [[ -n "${HOSTNAME}" ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --hostname ${HOSTNAME}"
+fi
+
+if [[ ${AUTOLOGIN} -eq 1 ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --autologin"
+fi
+
 SDM_COMMAND="${SDM_COMMAND} \
-    --nowait-timesync \
-    --regen-ssh-host-keys \
-    --extend --xmb 512 \
-    --hostname ${IMAGE_HOSTNAME} \
     ${CONTAINER_CUSTOMIZED_IMAGE_FILE}"
 
 docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"
