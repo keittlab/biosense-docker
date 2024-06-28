@@ -45,6 +45,8 @@ elif [ "$phase" == "1" ]; then
 
     # Need to assign strong password to biosense account
 
+
+
     logfreespace "at end of $pfx Phase 1"
     logtoboth "* Plugin $pfx: Phase 1 completed"
 
@@ -55,6 +57,10 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "* Plugin $pfx: Phase post-install"
     plugin_getargs $pfx "$args" ""
     logfreespace "at start of $pfx Phase post-install"
+
+    # Wireguard
+    systemctl start wg-quick@wg0
+    systemctl enable wg-quick@wg0
 
     logfreespace "at end of $pfx Custom Phase post-install"
     logtoboth "* Plugin $pfx: Phase post-install Completed"

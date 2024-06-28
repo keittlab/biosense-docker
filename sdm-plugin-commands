@@ -14,13 +14,14 @@ bootconfig:"dtoverlay=i2c-rtc,ds3231"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#l10n
 # L10n:"keymap=us|locale=en_US.UTF-8|timezone=Americas/Chicago"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#copydir
-copydir:"from=/home/agent/hostdir/biosense-scripts/|to=/usr/local/bin|rsyncopts=-av --chown=root:root --chmod=0755"
-copydir:"from=/home/agent/hostdir/biosense-systemd-files/|to=/etc/systemd/system|rsyncopts=-av --chown=root:root --chmod=0644"
+# copydir:"from=/home/agent/hostdir/biosense-scripts/|to=/usr/local/bin|rsyncopts=-av --chown=root:root --chmod=0755"
+# copydir:"from=/home/agent/hostdir/biosense-systemd-files/|to=/etc/systemd/system|rsyncopts=-av --chown=root:root --chmod=0644"
 # Directories for data to send and data to hold
 mkdir:"dir=/home/biosense/dataqueue|chown=biosense|chmod=0755"
 mkdir:"dir=/home/biosense/datastore|chown=biosense|chmod=0755"
 mkdir:"dir=/home/biosense/.ssh|chown=biosense|chmod=0700"
 copyfile:"from=/home/agent/hostdir/biosense-keys/authorized_keys|to=/home/biosense/.ssh|chown=biosense|chmod=0600"
+copyfile:"from=/home/agent/hostdir/wg_configs/wg0.conf|to=/etc/wireguard|chown=root|chmod=0600|mkdirif"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#imon
 # imon
 # System plugin

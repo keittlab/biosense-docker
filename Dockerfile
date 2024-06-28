@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y \
     systemd-container \
     binfmt-support \
     util-linux \
+    wireguard \
     xz-utils \
     zip \
     bzip2 \
