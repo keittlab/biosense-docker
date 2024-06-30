@@ -12,7 +12,7 @@ Here is an example:
 
 ```bash
 ./download_image 
-./customize_image --wg-ip 0.2 --overwrite --aptcache 192.168.1.21 
+./customize_image --wg-ip 10.123.0.2 --aptcache 192.168.1.21 
 ```
 
 After customization, an image file will be in the `customized_images` directory. The hostname of the device will be `biosense_0_2` and its wireguard ip number will be `10.123.0.2`. The customized image will have the hostname prepended.
