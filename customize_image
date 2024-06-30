@@ -8,14 +8,20 @@ DISABLE_BLUETOOTH=0
 DISABLE_TRIGGERHAPPY=0
 DEBUG=0
 APTCACHE=""
-HOSTNAME=""
+WG_IP=""
+SERVER_IP=""
+SERVER_PUBLIC_KEY=""
 AUTOLOGIN=0
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 -f <image_file> [--hostname <hostname>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>]"
-    echo "  -f <image_file>           : Path to the source image file."
-    echo "  --hostname <hostname>     : Set the hostname for the customized image."
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--server-ip <server_ip>] [--server-public-key <server_public_key>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>]"
+    echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (required)"
+    echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
+    echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
+    echo "  --image-file <file>       : Path to the source image file. Defaults to the latest image in the source directory if not specified."
+    echo "  --server-ip <server_ip>   : Set the IP address of the WireGuard server (default from customize_conf.yml)."
+    echo "  --server-public-key <server_public_key> : Set the public key of the WireGuard server (default from customize_conf.yml)."
     echo "  --autologin               : Enable autologin for the customized image."
     echo "  --overwrite               : Overwrite the customized image file if it exists."
     echo "  --disable-wifi            : Disable WiFi in the customized image."
@@ -26,15 +32,49 @@ usage() {
     exit 1
 }
 
+# Check if yq is installed
+if ! command -v yq &> /dev/null; then
+    echo "Error: yq is not installed. Please install yq to use this script."
+    exit 1
+fi
+
+# Function to read YAML configuration using yq
+read_yaml() {
+    local yaml_file=$1
+    local key=$2
+    yq eval ".$key" "$yaml_file"
+}
+
+# Read the YAML configuration file
+CONFIG_FILE="customize_conf.yml"
+DEFAULT_SERVER_IP=$(read_yaml "$CONFIG_FILE" "default_server_ip")
+DEFAULT_SERVER_PUBLIC_KEY=$(read_yaml "$CONFIG_FILE" "default_server_public_key")
+
 # Parse command line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -f)
+        --wg-ip)
+            WG_IP=$2
+            shift
+            ;;
+        --source-dir)
+            IMAGE_SOURCE_DIR=$2
+            shift
+            ;;
+        --dest-dir)
+            IMAGE_DEST_DIR=$2
+            shift
+            ;;
+        --image-file)
             IMAGE_FILE=$2
             shift
             ;;
-        --hostname)
-            HOSTNAME=$2
+        --server-ip)
+            SERVER_IP=$2
+            shift
+            ;;
+        --server-public-key)
+            SERVER_PUBLIC_KEY=$2
             shift
             ;;
         --autologin)
@@ -67,11 +107,39 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# Use default values from the config if not provided
+SERVER_IP=${SERVER_IP:-$DEFAULT_SERVER_IP}
+SERVER_PUBLIC_KEY=${SERVER_PUBLIC_KEY:-$DEFAULT_SERVER_PUBLIC_KEY}
+
+# Function to find the latest image file in the source directory
+find_latest_image() {
+    local latest_image=$(ls -t ${IMAGE_SOURCE_DIR}/*.img 2>/dev/null | head -n 1)
+    if [[ -z "$latest_image" ]]; then
+        echo "No image files found in the source directory."
+        exit 1
+    fi
+    echo $latest_image
+}
+
 # Validate input parameters
-if [[ -z "${IMAGE_FILE}" ]]; then
-    echo "Image file is required."
+if [[ -z "${WG_IP}" ]]; then
+    echo "WireGuard IP is required."
     usage
 fi
+
+if [[ -z "${IMAGE_FILE}" ]]; then
+    IMAGE_FILE=$(find_latest_image)
+    echo "No image file specified. Using the latest image file: ${IMAGE_FILE}"
+fi
+
+# Add '10.123.' prefix if not included in WG_IP
+if [[ "${WG_IP}" != 10.123.* ]]; then
+    WG_IP="10.123.${WG_IP}"
+fi
+
+# Generate hostname from WireGuard IP
+IFS='.' read -r -a ip_parts <<< "${WG_IP}"
+HOSTNAME="biosense_${ip_parts[2]}_${ip_parts[3]}"
 
 # Check if the image file exists
 if [[ ! -f "${IMAGE_FILE}" ]]; then
@@ -81,10 +149,11 @@ fi
 
 echo ""
 echo "Using image file: ${IMAGE_FILE}"
+echo "Generated hostname: ${HOSTNAME}"
 echo ""
 
 IMAGE_FILE_BASE=$(basename "${IMAGE_FILE}")
-CUSTOMIZED_IMAGE_FILE="./${IMAGE_DEST_DIR}/${IMAGE_FILE_BASE}"
+CUSTOMIZED_IMAGE_FILE="./${IMAGE_DEST_DIR}/${HOSTNAME}-${IMAGE_FILE_BASE}"
 CUSTOMIZED_IMAGE_FILE_BASE=$(basename "${CUSTOMIZED_IMAGE_FILE}")
 
 echo "Writing to ${CUSTOMIZED_IMAGE_FILE_BASE}"
@@ -131,15 +200,15 @@ fi
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     --plugin disables:\"${DISABLES}\" \
-    --plugin @/home/agent/hostdir/sdm-plugin-commands"
+    --plugin @/home/agent/hostdir/sdm-plugin-commands \
+    --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}|server_ip=${SERVER_IP}|server_public_key=${SERVER_PUBLIC_KEY}\" \
+    --nowait-timesync"
 
 if [[ -n "${APTCACHE}" ]]; then
     SDM_COMMAND="${SDM_COMMAND} --aptcache ${APTCACHE}"
 fi
 
-if [[ -n "${HOSTNAME}" ]]; then
-    SDM_COMMAND="${SDM_COMMAND} --hostname ${HOSTNAME}"
-fi
+SDM_COMMAND="${SDM_COMMAND} --hostname ${HOSTNAME}"
 
 if [[ ${AUTOLOGIN} -eq 1 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --autologin"

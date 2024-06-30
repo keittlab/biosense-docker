@@ -21,7 +21,7 @@ mkdir:"dir=/home/biosense/dataqueue|chown=biosense|chmod=0755"
 mkdir:"dir=/home/biosense/datastore|chown=biosense|chmod=0755"
 mkdir:"dir=/home/biosense/.ssh|chown=biosense|chmod=0700"
 copyfile:"from=/home/agent/hostdir/biosense-keys/authorized_keys|to=/home/biosense/.ssh|chown=biosense|chmod=0600"
-copyfile:"from=/home/agent/hostdir/wg_configs/wg0.conf|to=/etc/wireguard|chown=root|chmod=0600|mkdirif"
+# copyfile:"from=/home/agent/hostdir/wg_configs/wg0.conf|to=/etc/wireguard|chown=root|chmod=0600|mkdirif"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#imon
 # imon
 # System plugin
@@ -31,6 +31,6 @@ copyfile:"from=/home/agent/hostdir/wg_configs/wg0.conf|to=/etc/wireguard|chown=r
 #system:"name=s2|systemd-config=system=/home/agent/hostdir/biosense-config-files/ssh-retry.conf"
 #system:"name=s3|systemd-config=system=/home/agent/hostdir/biosense-config-files/wg-keygen.conf"
 # Custom plugin
-sdm-biosense-setup-plugin
+# sdm-biosense-setup-plugin
 
 

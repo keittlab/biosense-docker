@@ -27,9 +27,9 @@ download_latest_image() {
         exit 1
     fi
     LATEST_IMAGE_URL="${BASE_URL}${LATEST_URL}$(curl -s "${BASE_URL}${LATEST_URL}" | grep -o '[^"]*.img.xz' | head -n 1)"
-    local tmp_xz="$TMP_DIR/latest-lite.img.xz"
-    local tmp_img="$TMP_DIR/latest-lite.img"
-    local dest_img="${IMAGE_SOURCE_DIR}/latest-lite.img"
+    local tmp_xz="$TMP_DIR/$(basename ${LATEST_URL})-lite.img.xz"
+    local tmp_img="$TMP_DIR/$(basename ${LATEST_URL})-lite.img"
+    local dest_img="${IMAGE_SOURCE_DIR}/$(basename ${LATEST_URL})-lite.img"
 
     echo "Downloading the latest Raspberry Pi OS Lite image from $LATEST_IMAGE_URL..."
     curl -L "$LATEST_IMAGE_URL" -o $tmp_xz
