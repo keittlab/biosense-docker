@@ -14,10 +14,12 @@ SERVER_PUBLIC_KEY=""
 AUTOLOGIN=0
 CONFIG_FILE=""
 SAVE_CONFIG_FILE=""
+USE_32_BIT=0
+UPDATE_CONFIG=0
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--server-ip <server_ip>] [--server-public-key <server_public_key>] [--config-file <file>] [--save-config <file>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>]"
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--server-ip <server_ip>] [--server-public-key <server_public_key>] [--config-file <file>] [--save-config <file>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--32bit] [--update-config]"
     echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (optional)"
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
     echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
@@ -26,6 +28,7 @@ usage() {
     echo "  --server-public-key <server_public_key> : Set the public key of the WireGuard server. (required)"
     echo "  --config-file <file>      : Specify a YAML configuration file to read default values from."
     echo "  --save-config <file>      : Write out all current settings to the named file in YAML format."
+    echo "  --update-config           : Update the specified configuration file with current settings."
     echo "  --autologin               : Enable autologin for the customized image."
     echo "  --overwrite               : Overwrite the customized image file if it exists."
     echo "  --disable-wifi            : Disable WiFi in the customized image."
@@ -33,6 +36,7 @@ usage() {
     echo "  --disable-triggerhappy    : Disable Triggerhappy in the customized image."
     echo "  --debug                   : Run sdm without --batch option."
     echo "  --aptcache <cache_address>: Use the specified apt cache server."
+    echo "  --32bit                   : Use 32-bit images instead of the default 64-bit images."
     exit 1
 }
 
@@ -131,6 +135,9 @@ while [[ "$#" -gt 0 ]]; do
             SAVE_CONFIG_FILE=$2
             shift
             ;;
+        --update-config)
+            UPDATE_CONFIG=1
+            ;;
         --autologin)
             AUTOLOGIN=1
             ;;
@@ -155,6 +162,9 @@ while [[ "$#" -gt 0 ]]; do
         --aptcache)
             APTCACHE=$2
             shift
+            ;;
+        --32bit)
+            USE_32_BIT=1
             ;;
         *)
             echo "Invalid option: $1" 1>&2
@@ -308,6 +318,17 @@ if [[ -n "${SAVE_CONFIG_FILE}" ]]; then
 
     save_yaml "${SAVE_CONFIG_FILE}"
     echo "Current configuration saved to ${SAVE_CONFIG_FILE}"
+fi
+
+# Update the specified configuration file if requested
+if [[ ${UPDATE_CONFIG} -eq 1 && -n "${CONFIG_FILE}" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --update-config option."
+        exit 1
+    fi
+
+    save_yaml "${CONFIG_FILE}"
+    echo "Configuration file ${CONFIG_FILE} updated with current settings"
 fi
 
 exit 0
