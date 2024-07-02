@@ -86,6 +86,14 @@ EOL
     # Generate the command to append to the server configuration
     plugin_addnote "On the server run: sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
 
+    cat > /etc/sdm/0piboot/010-config-eeprom.sh <<EOF
+#!/bin/bash
+rpi-eeprom-config > /tmp/bootconf.txt
+echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
+sudo rpi-eeprom-config --apply /tmp/bootconf.txt
+EOF
+    chomd +x /etc/sdm/0piboot/010-config-eeprom.sh
+
     logtoboth "* Plugin $pfx: Phase 1 completed"
 
 elif [ "$phase" == "post-install" ]; then
