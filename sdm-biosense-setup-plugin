@@ -45,6 +45,17 @@ if [ "$phase" == "0" ]; then
     # must be preceded by $SDMPT
     #
     logtoboth "* Plugin $pfx: Start Phase 0"
+
+    mkdir -p $SDMPT/home/biosense/.ssh
+    for key_file in /home/agent/hostdir/biosense_ssh_keys/*
+    do
+        cp $key_file $SDMPT/home/biosense/.ssh
+    done
+    chown -R biosense:biosense $SDMPT/home/biosense/.ssh
+    chmod -R go-rwx $SDMPT/home/biosense/.ssh
+
+    logtoboth "Copied ssh keys to user biosense"
+
     logtoboth "* Plugin $pfx: Complete Phase 0"
 
 elif [ "$phase" == "1" ]; then
@@ -85,6 +96,22 @@ EOL
 
     # Generate the command to append to the server configuration
     plugin_addnote "On the server run: sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
+
+    cat > /etc/sdm/0piboot/010-config-eeprom.sh <<EOF
+#!/bin/bash
+rpi-eeprom-config > /tmp/bootconf.txt
+echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
+sudo rpi-eeprom-config --apply /tmp/bootconf.txt
+EOF
+    chomd +x /etc/sdm/0piboot/010-config-eeprom.sh
+
+    logtoboth "Created eeprom update script"
+
+    mkdir -m 0755 -p /home/biosense/dataqueue /home/biosense/datastore
+    chown biosense:biosense /home/biosense/dataqueue
+    chown biosense:biosense /home/biosense/datastore
+
+    logtoboth "Created dataqueue and datastore directories"
 
     logtoboth "* Plugin $pfx: Phase 1 completed"
 

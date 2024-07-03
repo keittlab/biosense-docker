@@ -1,14 +1,17 @@
 #!/bin/bash
 
 IMAGE_SOURCE_DIR="source_images"
-BASE_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/"
+BASE_URL_32="https://downloads.raspberrypi.org/raspios_lite_armhf/images/"
+BASE_URL_64="https://downloads.raspberrypi.org/raspios_lite_arm64/images/"
 INTERACTIVE=0
+USE_32_BIT=0
 TMP_DIR=$(mktemp -d)
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 [--interactive]"
+    echo "Usage: $0 [--interactive] [--32bit]"
     echo "  --interactive : Interactive mode to choose from among the 10 most recent versions."
+    echo "  --32bit       : Use 32-bit images instead of the default 64-bit images."
     exit 1
 }
 
@@ -20,8 +23,10 @@ trap cleanup EXIT
 
 # Function to download the latest image
 download_latest_image() {
+    local BASE_URL=$1
+
     echo "Fetching the latest Raspberry Pi OS Lite image URL..."
-    LATEST_URL=$(curl -s "${BASE_URL}" | grep -o 'href="raspios_lite_armhf-[^"]*/"' | sort -r | head -n 1 | cut -d'"' -f2)
+    LATEST_URL=$(curl -s "${BASE_URL}" | grep -o 'href="raspios_lite_[^"]*/"' | sort -r | head -n 1 | cut -d'"' -f2)
     if [[ -z "$LATEST_URL" ]]; then
         echo "Failed to fetch the latest image URL."
         exit 1
@@ -35,7 +40,7 @@ download_latest_image() {
     curl -L "$LATEST_IMAGE_URL" -o $tmp_xz
 
     if file $tmp_xz | grep -q 'XZ compressed data'; then
-        check_integrity $tmp_xz $LATEST_URL
+        check_integrity $tmp_xz $LATEST_URL $BASE_URL
         unxz $tmp_xz
         IMAGE_FILE=$tmp_img
     else
@@ -49,8 +54,10 @@ download_latest_image() {
 
 # Function to fetch recent versions from the directory listing
 fetch_recent_versions() {
+    local BASE_URL=$1
+
     echo "Fetching the 10 most recent versions of Raspberry Pi OS Lite..."
-    RECENT_VERSIONS=$(curl -s $BASE_URL | grep -o 'raspios_lite_armhf-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}/' | sort -r | uniq | head -n 10)
+    RECENT_VERSIONS=$(curl -s $BASE_URL | grep -o 'raspios_lite_[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}/' | sort -r | uniq | head -n 10)
 
     if [[ -z "$RECENT_VERSIONS" ]]; then
         echo "No recent versions found. Exiting."
@@ -72,7 +79,9 @@ fetch_recent_versions() {
 
 # Function to list and download recent versions
 download_interactive_image() {
-    fetch_recent_versions
+    local BASE_URL=$1
+
+    fetch_recent_versions $BASE_URL
 
     echo "Please select a version to download:"
     select date in "${RECENT_DATES[@]}"; do
@@ -86,7 +95,7 @@ download_interactive_image() {
                     echo "Downloading $version..."
                     curl -L $version -o $tmp_xz
                     if file $tmp_xz | grep -q 'XZ compressed data'; then
-                        check_integrity $tmp_xz $date
+                        check_integrity $tmp_xz $date $BASE_URL
                         unxz $tmp_xz
                         IMAGE_FILE=$tmp_img
                     else
@@ -110,8 +119,9 @@ download_interactive_image() {
 check_integrity() {
     local file=$1
     local version=$2
-    local sha256_file=$(curl -s "${BASE_URL}${version}" | grep -o '[^"]*.img.xz.sha256' | head -n 1)
-    local sha256_url="${BASE_URL}${version}${sha256_file}"
+    local base_url=$3
+    local sha256_file=$(curl -s "${base_url}${version}" | grep -o '[^"]*.img.xz.sha256' | head -n 1)
+    local sha256_url="${base_url}${version}${sha256_file}"
     local tmp_sha256="$TMP_DIR/$(basename $file).sha256"
 
     echo "Checking integrity of the downloaded image..."
@@ -153,6 +163,9 @@ while [[ "$#" -gt 0 ]]; do
         --interactive)
             INTERACTIVE=1
             ;;
+        --32bit)
+            USE_32_BIT=1
+            ;;
         *)
             echo "Invalid option: $1" 1>&2
             usage
@@ -164,11 +177,18 @@ done
 # Ensure the source_images directory exists
 mkdir -p $IMAGE_SOURCE_DIR
 
+# Set the appropriate base URL
+if [[ $USE_32_BIT -eq 1 ]]; then
+    BASE_URL=$BASE_URL_32
+else
+    BASE_URL=$BASE_URL_64
+fi
+
 # Download the image based on the mode
 if [[ $INTERACTIVE -eq 1 ]]; then
-    download_interactive_image
+    download_interactive_image $BASE_URL
 else
-    download_latest_image
+    download_latest_image $BASE_URL
 fi
 
 exit 0

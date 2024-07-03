@@ -12,16 +12,23 @@ WG_IP=""
 SERVER_IP=""
 SERVER_PUBLIC_KEY=""
 AUTOLOGIN=0
+CONFIG_FILE=""
+SAVE_CONFIG_FILE=""
+USE_32_BIT=0
+UPDATE_CONFIG=0
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--server-ip <server_ip>] [--server-public-key <server_public_key>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>]"
-    echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (required)"
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--server-ip <server_ip>] [--server-public-key <server_public_key>] [--config-file <file>] [--save-config <file>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--32bit] [--update-config]"
+    echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (optional)"
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
     echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
-    echo "  --image-file <file>       : Path to the source image file. Defaults to the latest image in the source directory if not specified."
-    echo "  --server-ip <server_ip>   : Set the IP address of the WireGuard server (default from customize_conf.yml)."
-    echo "  --server-public-key <server_public_key> : Set the public key of the WireGuard server (default from customize_conf.yml)."
+    echo "  --image-file <file>       : Path to the source image file. Can be a full path or just the filename."
+    echo "  --server-ip <server_ip>   : Set the IP address of the WireGuard server. (required)"
+    echo "  --server-public-key <server_public_key> : Set the public key of the WireGuard server. (required)"
+    echo "  --config-file <file>      : Specify a YAML configuration file to read default values from."
+    echo "  --save-config <file>      : Write out all current settings to the named file in YAML format."
+    echo "  --update-config           : Update the specified configuration file with current settings."
     echo "  --autologin               : Enable autologin for the customized image."
     echo "  --overwrite               : Overwrite the customized image file if it exists."
     echo "  --disable-wifi            : Disable WiFi in the customized image."
@@ -29,26 +36,69 @@ usage() {
     echo "  --disable-triggerhappy    : Disable Triggerhappy in the customized image."
     echo "  --debug                   : Run sdm without --batch option."
     echo "  --aptcache <cache_address>: Use the specified apt cache server."
+    echo "  --32bit                   : Use 32-bit images instead of the default 64-bit images."
     exit 1
 }
 
-# Check if yq is installed
-if ! command -v yq &> /dev/null; then
-    echo "Error: yq is not installed. Please install yq to use this script."
-    exit 1
-fi
+# Function to trim whitespace from a variable
+trim() {
+    echo "$1" | awk '{$1=$1};1'
+}
 
-# Function to read YAML configuration using yq
+# Function to read YAML configuration using yq and trim the output
 read_yaml() {
     local yaml_file=$1
     local key=$2
-    yq eval ".$key" "$yaml_file"
+    local value=$(yq eval ".$key" "$yaml_file")
+    echo $(trim "$value")
 }
 
-# Read the YAML configuration file
-CONFIG_FILE="customize_conf.yml"
-DEFAULT_SERVER_IP=$(read_yaml "$CONFIG_FILE" "default_server_ip")
-DEFAULT_SERVER_PUBLIC_KEY=$(read_yaml "$CONFIG_FILE" "default_server_public_key")
+# Function to save current settings to a YAML file
+save_yaml() {
+    local yaml_file=$1
+    {
+        echo "wg_ip: ${WG_IP}"
+        echo "source_dir: ${IMAGE_SOURCE_DIR}"
+        echo "dest_dir: ${IMAGE_DEST_DIR}"
+        echo "image_file: ${IMAGE_FILE}"
+        echo "server_ip: ${SERVER_IP}"
+        echo "server_public_key: ${SERVER_PUBLIC_KEY}"
+        echo "autologin: ${AUTOLOGIN}"
+        echo "disable_wifi: ${DISABLE_WIFI}"
+        echo "disable_bluetooth: ${DISABLE_BLUETOOTH}"
+        echo "disable_triggerhappy: ${DISABLE_TRIGGERHAPPY}"
+        echo "aptcache: ${APTCACHE}"
+    } > "$yaml_file"
+}
+
+# Function to find the latest image file in the source directory
+find_latest_image() {
+    local latest_image=$(ls -t ${IMAGE_SOURCE_DIR}/*.img 2>/dev/null | head -n 1)
+    if [[ -z "$latest_image" ]]; then
+        echo "No image files found in the source directory."
+        exit 1
+    fi
+    echo $(basename "$latest_image")
+}
+
+# Function to find the next available IP in the series
+next_ip() {
+    local last_ip=$(read_yaml "$CONFIG_FILE" "wg_ip")
+    if [[ "$last_ip" == "null" || -z "$last_ip" ]]; then
+        echo "Error: 'wg_ip' not found in the configuration file."
+        exit 1
+    fi
+
+    local IFS='.'
+    read -r -a ip_parts <<< "$last_ip"
+    if [[ ${ip_parts[3]} -eq 255 ]]; then
+        ip_parts[3]=0
+        ip_parts[2]=$((ip_parts[2] + 1))
+    else
+        ip_parts[3]=$((ip_parts[3] + 1))
+    fi
+    echo "${ip_parts[0]}.${ip_parts[1]}.${ip_parts[2]}.${ip_parts[3]}"
+}
 
 # Parse command line arguments
 while [[ "$#" -gt 0 ]]; do
@@ -66,7 +116,7 @@ while [[ "$#" -gt 0 ]]; do
             shift
             ;;
         --image-file)
-            IMAGE_FILE=$2
+            IMAGE_FILE=$(basename "$2")
             shift
             ;;
         --server-ip)
@@ -77,6 +127,17 @@ while [[ "$#" -gt 0 ]]; do
             SERVER_PUBLIC_KEY=$2
             shift
             ;;
+        --config-file)
+            CONFIG_FILE=$2
+            shift
+            ;;
+        --save-config)
+            SAVE_CONFIG_FILE=$2
+            shift
+            ;;
+        --update-config)
+            UPDATE_CONFIG=1
+            ;;
         --autologin)
             AUTOLOGIN=1
             ;;
@@ -85,12 +146,15 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --disable-wifi)
             DISABLE_WIFI=1
+            shift
             ;;
         --disable-bluetooth)
             DISABLE_BLUETOOTH=1
+            shift
             ;;
         --disable-triggerhappy)
             DISABLE_TRIGGERHAPPY=1
+            shift
             ;;
         --debug)
             DEBUG=1
@@ -98,6 +162,9 @@ while [[ "$#" -gt 0 ]]; do
         --aptcache)
             APTCACHE=$2
             shift
+            ;;
+        --32bit)
+            USE_32_BIT=1
             ;;
         *)
             echo "Invalid option: $1" 1>&2
@@ -107,23 +174,46 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# Use default values from the config if not provided
-SERVER_IP=${SERVER_IP:-$DEFAULT_SERVER_IP}
-SERVER_PUBLIC_KEY=${SERVER_PUBLIC_KEY:-$DEFAULT_SERVER_PUBLIC_KEY}
-
-# Function to find the latest image file in the source directory
-find_latest_image() {
-    local latest_image=$(ls -t ${IMAGE_SOURCE_DIR}/*.img 2>/dev/null | head -n 1)
-    if [[ -z "$latest_image" ]]; then
-        echo "No image files found in the source directory."
+# Read the YAML configuration file if specified
+if [[ -n "$CONFIG_FILE" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --config-file option."
         exit 1
     fi
-    echo $latest_image
-}
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "Error: Specified config file does not exist."
+        exit 1
+    fi
+
+    DEFAULT_SERVER_IP=$(read_yaml "$CONFIG_FILE" "server_ip")
+    DEFAULT_SERVER_PUBLIC_KEY=$(read_yaml "$CONFIG_FILE" "server_public_key")
+    SERVER_IP=$(trim "${SERVER_IP:-$DEFAULT_SERVER_IP}")
+    SERVER_PUBLIC_KEY=$(trim "${SERVER_PUBLIC_KEY:-$DEFAULT_SERVER_PUBLIC_KEY}")
+
+    if [[ -z "${WG_IP}" ]]; then
+        WG_IP=$(next_ip)
+        if [[ "$WG_IP" == "Error: 'wg_ip' not found in the configuration file." ]]; then
+            echo "$WG_IP"
+            exit 1
+        fi
+        echo "Using next available WG_IP: ${WG_IP}"
+    fi
+fi
 
 # Validate input parameters
 if [[ -z "${WG_IP}" ]]; then
     echo "WireGuard IP is required."
+    usage
+fi
+
+if [[ -z "${SERVER_IP}" || "${SERVER_IP}" == "null" ]]; then
+    echo "Server IP is required."
+    usage
+fi
+
+if [[ -z "${SERVER_PUBLIC_KEY}" || "${SERVER_PUBLIC_KEY}" == "null" ]]; then
+    echo "Server public key is required."
     usage
 fi
 
@@ -142,13 +232,13 @@ IFS='.' read -r -a ip_parts <<< "${WG_IP}"
 HOSTNAME="biosense_${ip_parts[2]}_${ip_parts[3]}"
 
 # Check if the image file exists
-if [[ ! -f "${IMAGE_FILE}" ]]; then
+if [[ ! -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" ]]; then
     echo "Image file does not exist."
     exit 1
 fi
 
 echo ""
-echo "Using image file: ${IMAGE_FILE}"
+echo "Using image file: ${IMAGE_SOURCE_DIR}/${IMAGE_FILE}"
 echo "Generated hostname: ${HOSTNAME}"
 echo ""
 
@@ -166,13 +256,13 @@ CONTAINER_CUSTOMIZED_IMAGE_FILE="./hostdir/${IMAGE_DEST_DIR}/${CUSTOMIZED_IMAGE_
 if [[ -f "${CUSTOMIZED_IMAGE_FILE}" ]]; then
     if [[ ${OVERWRITE} -eq 1 ]]; then
         echo "Overwriting existing file: ${CUSTOMIZED_IMAGE_FILE}"
-        cp -a -f "${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+        cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
     else
         echo "Customized image file already exists and overwrite option not set. Exiting."
         exit 1
     fi
 else
-    cp -a -f "${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+    cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
 fi
 
 DOCKER_IMAGE_NAME="biosense-sdm"
@@ -218,5 +308,27 @@ SDM_COMMAND="${SDM_COMMAND} \
     ${CONTAINER_CUSTOMIZED_IMAGE_FILE}"
 
 docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"
+
+# Save the current configuration to a file if requested
+if [[ -n "${SAVE_CONFIG_FILE}" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --save-config option."
+        exit 1
+    fi
+
+    save_yaml "${SAVE_CONFIG_FILE}"
+    echo "Current configuration saved to ${SAVE_CONFIG_FILE}"
+fi
+
+# Update the specified configuration file if requested
+if [[ ${UPDATE_CONFIG} -eq 1 && -n "${CONFIG_FILE}" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --update-config option."
+        exit 1
+    fi
+
+    save_yaml "${CONFIG_FILE}"
+    echo "Configuration file ${CONFIG_FILE} updated with current settings"
+fi
 
 exit 0
