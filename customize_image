@@ -9,16 +9,18 @@ DISABLE_TRIGGERHAPPY=0
 DEBUG=0
 APTCACHE=""
 WG_IP=""
-AUTOLOGIN=0
 CONFIG_FILE=""
 SAVE_CONFIG_FILE=""
 USE_32_BIT=0
 UPDATE_CONFIG=0
 INCREMENT_IP=0
+WIFI_COUNTRY="US"
+WIFI_SSID=""
+WIFI_PASSWORD=""
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--config-file <file>] [--save-config <file>] [--autologin] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--32bit] [--update-config] [--increment-ip]"
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--config-file <file>] [--save-config <file>] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--32bit] [--update-config] [--increment-ip] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>]"
     echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (optional)"
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
     echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
@@ -26,7 +28,6 @@ usage() {
     echo "  --config-file <file>      : Specify a YAML configuration file to read default values from."
     echo "  --save-config <file>      : Write out all current settings to the named file in YAML format."
     echo "  --update-config           : Update the specified configuration file with current settings."
-    echo "  --autologin               : Enable autologin for the customized image."
     echo "  --overwrite               : Overwrite the customized image file if it exists."
     echo "  --disable-wifi            : Disable WiFi in the customized image."
     echo "  --disable-bluetooth       : Disable Bluetooth in the customized image."
@@ -35,6 +36,9 @@ usage() {
     echo "  --aptcache <cache_address>: Use the specified apt cache server."
     echo "  --32bit                   : Use 32-bit images instead of the default 64-bit images."
     echo "  --increment-ip            : Increment the IP number based on the last IP in the configuration file."
+    echo "  --wifi-country <countryname> : Specify the name of the country to use for the WiFi Country setting."
+    echo "  --wifi-ssid <ssid>        : Specifies the WiFi SSID to enable."
+    echo "  --wifi-password <password>: Password for the wifi-ssid network."
     exit 1
 }
 
@@ -59,11 +63,13 @@ save_yaml() {
         echo "source_dir: \"${IMAGE_SOURCE_DIR}\""
         echo "dest_dir: \"${IMAGE_DEST_DIR}\""
         echo "image_file: \"${IMAGE_FILE}\""
-        echo "autologin: ${AUTOLOGIN}"
         echo "disable_wifi: ${DISABLE_WIFI}"
         echo "disable_bluetooth: ${DISABLE_BLUETOOTH}"
         echo "disable_triggerhappy: ${DISABLE_TRIGGERHAPPY}"
         echo "aptcache: \"${APTCACHE}\""
+        echo "wifi_country: \"${WIFI_COUNTRY}\""
+        echo "wifi_ssid: \"${WIFI_SSID}\""
+        echo "wifi_password: \"${WIFI_PASSWORD}\""
     } > "$yaml_file"
 }
 
@@ -121,9 +127,6 @@ while [[ "$#" -gt 0 ]]; do
         --update-config)
             UPDATE_CONFIG=1
             ;;
-        --autologin)
-            AUTOLOGIN=1
-            ;;
         --overwrite)
             OVERWRITE=1
             ;;
@@ -152,6 +155,18 @@ while [[ "$#" -gt 0 ]]; do
         --increment-ip)
             INCREMENT_IP=1
             ;;
+        --wifi-country)
+            WIFI_COUNTRY=$2
+            shift
+            ;;
+        --wifi-ssid)
+            WIFI_SSID=$2
+            shift
+            ;;
+        --wifi-password)
+            WIFI_PASSWORD=$2
+            shift
+            ;;
         *)
             echo "Invalid option: $1" 1>&2
             usage
@@ -172,33 +187,43 @@ if [[ -n "$CONFIG_FILE" ]]; then
         exit 1
     fi
 
-    # If --wg-ip is not provided, attempt to get it from the config file
-    if [[ -z "${WG_IP}" ]]; then
-        WG_IP=$(read_yaml "$CONFIG_FILE" "wg_ip")
-    fi
-fi
+    # Read values from the config file
+    CONFIG_WG_IP=$(read_yaml "$CONFIG_FILE" "wg_ip")
+    CONFIG_WIFI_COUNTRY=$(read_yaml "$CONFIG_FILE" "wifi_country")
+    CONFIG_IMAGE_SOURCE_DIR=$(read_yaml "$CONFIG_FILE" "source_dir")
+    CONFIG_IMAGE_DEST_DIR=$(read_yaml "$CONFIG_FILE" "dest_dir")
+    CONFIG_IMAGE_FILE=$(read_yaml "$CONFIG_FILE" "image_file")
+    CONFIG_DISABLE_WIFI=$(read_yaml "$CONFIG_FILE" "disable_wifi")
+    CONFIG_DISABLE_BLUETOOTH=$(read_yaml "$CONFIG_FILE" "disable_bluetooth")
+    CONFIG_DISABLE_TRIGGERHAPPY=$(read_yaml "$CONFIG_FILE" "disable_triggerhappy")
+    CONFIG_APTCACHE=$(read_yaml "$CONFIG_FILE" "aptcache")
+    CONFIG_WIFI_SSID=$(read_yaml "$CONFIG_FILE" "wifi_ssid")
+    CONFIG_WIFI_PASSWORD=$(read_yaml "$CONFIG_FILE" "wifi_password")
 
-# If --increment-ip is specified, increment the IP address
-if [[ ${INCREMENT_IP} -eq 1 ]]; then
-    if [[ -z "${WG_IP}" ]]; then
-        if [[ -z "$CONFIG_FILE" ]]; then
-            echo "Error: '--wg-ip' is not provided and no config file is specified."
-            usage
-        fi
-        WG_IP=$(read_yaml "$CONFIG_FILE" "wg_ip")
-        if [[ "$WG_IP" == "null" || -z "$WG_IP" ]]; then
-            echo "Error: 'wg_ip' not found in the configuration file."
-            exit 1
-        fi
-    fi
-    WG_IP=$(next_ip "$WG_IP")
-    echo "Using incremented WG_IP: ${WG_IP}"
+    # Apply config file values
+    IMAGE_SOURCE_DIR="${IMAGE_SOURCE_DIR:-$CONFIG_IMAGE_SOURCE_DIR}"
+    IMAGE_DEST_DIR="${IMAGE_DEST_DIR:-$CONFIG_IMAGE_DEST_DIR}"
+    IMAGE_FILE="${IMAGE_FILE:-$CONFIG_IMAGE_FILE}"
+    DISABLE_WIFI="${DISABLE_WIFI:-$CONFIG_DISABLE_WIFI}"
+    DISABLE_BLUETOOTH="${DISABLE_BLUETOOTH:-$CONFIG_DISABLE_BLUETOOTH}"
+    DISABLE_TRIGGERHAPPY="${DISABLE_TRIGGERHAPPY:-$CONFIG_DISABLE_TRIGGERHAPPY}"
+    APTCACHE="${APTCACHE:-$CONFIG_APTCACHE}"
+    WIFI_COUNTRY="${WIFI_COUNTRY:-$CONFIG_WIFI_COUNTRY}"
+    WIFI_SSID="${WIFI_SSID:-$CONFIG_WIFI_SSID}"
+    WIFI_PASSWORD="${WIFI_PASSWORD:-$CONFIG_WIFI_PASSWORD}"
+    WG_IP="${WG_IP:-$CONFIG_WG_IP}"
 fi
 
 # Validate input parameters
 if [[ -z "${WG_IP}" ]]; then
     echo "WireGuard IP is required."
     usage
+fi
+
+# If --increment-ip is specified, increment the IP address
+if [[ ${INCREMENT_IP} -eq 1 ]]; then
+    WG_IP=$(next_ip "$WG_IP")
+    echo "Using incremented WG_IP: ${WG_IP}"
 fi
 
 if [[ -z "${IMAGE_FILE}" ]]; then
@@ -271,22 +296,30 @@ if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
 fi
 
+# Add the necessary plugins to the sdm command
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     --plugin disables:\"${DISABLES}\" \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
-    --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}\" \
-    --nowait-timesync"
+    --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}\""
+
+# Add network plugin if WiFi details are specified
+NETWORK_PLUGIN_ARGS=""
+[ -n "${WIFI_SSID}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wifissid=${WIFI_SSID}|"
+[ -n "${WIFI_PASSWORD}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wifipassword=${WIFI_PASSWORD}|"
+[ -n "${WIFI_COUNTRY}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wificountry=${WIFI_COUNTRY}|"
+if [[ -n "${NETWORK_PLUGIN_ARGS}" ]]; then
+    NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS%|}"  # Remove trailing '|'
+    SDM_COMMAND="${SDM_COMMAND} --plugin network:\"${NETWORK_PLUGIN_ARGS}|noipv6\""
+fi
+
+SDM_COMMAND="${SDM_COMMAND} --nowait-timesync"
 
 if [[ -n "${APTCACHE}" ]]; then
     SDM_COMMAND="${SDM_COMMAND} --aptcache ${APTCACHE}"
 fi
 
 SDM_COMMAND="${SDM_COMMAND} --hostname ${HOSTNAME}"
-
-if [[ ${AUTOLOGIN} -eq 1 ]]; then
-    SDM_COMMAND="${SDM_COMMAND} --autologin"
-fi
 
 SDM_COMMAND="${SDM_COMMAND} \
     ${CONTAINER_CUSTOMIZED_IMAGE_FILE}"

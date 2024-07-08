@@ -10,7 +10,7 @@ apps:"apps=wireguard,audacity,alsa-utils,sox"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#btwifiset
 # btwifiset:"country=US"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#bootconfig
-bootconfig:"dtoverlay=i2c-rtc,ds3231"
+# bootconfig:"dtoverlay=i2c-rtc,ds3231"
 #serial:"pi5"
 #bootconfig:"dtoverlay=i2c-rtc,ds3231 console=serial0,115200 console=tty1"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#l10n
