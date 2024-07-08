@@ -2,7 +2,7 @@
 
 # Load SDM parameters
 function loadparams() {
-    source $SDMPT/etc/sdm/sdm-readparams
+    source "$SDMPT/etc/sdm/sdm-readparams"
 }
 
 # Function to add a note to the end of the customization process
@@ -14,30 +14,17 @@ function plugin_addnote() {
 
 # Get the phase (0, 1, or post-install) and arguments
 phase=$1
-pfx="$(basename $0)"
+pfx="$(basename "$0")"
 args="$2"
-vldargs="wg_ip|server_ip|server_public_key"
-reqargs="wg_ip|server_ip|server_public_key"
+vldargs="|wg_ip|"
+reqargs="|wg_ip|"
 loadparams
 
 # Extract arguments
-plugin_getargs "$pfx" "$2"
+plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
 
-# Check if the required arguments are provided
-if [ -z "$wg_ip" ]; then
-    logtoboth "Error: WireGuard IP (wg_ip) is required."
-    exit 1
-fi
-
-if [ -z "$server_ip" ]; then
-    logtoboth "Error: Server IP (server_ip) is required."
-    exit 1
-fi
-
-if [ -z "$server_public_key" ]; then
-    logtoboth "Error: Server Public Key (server_public_key) is required."
-    exit 1
-fi
+# Log the values for debugging
+logtoboth "wg_ip=${wg_ip}"
 
 if [ "$phase" == "0" ]; then
     #
@@ -46,15 +33,31 @@ if [ "$phase" == "0" ]; then
     #
     logtoboth "* Plugin $pfx: Start Phase 0"
 
-    mkdir -p $SDMPT/home/biosense/.ssh
-    for key_file in /home/agent/hostdir/biosense_ssh_keys/*
-    do
-        cp $key_file $SDMPT/home/biosense/.ssh
-    done
-    chown -R biosense:biosense $SDMPT/home/biosense/.ssh
-    chmod -R go-rwx $SDMPT/home/biosense/.ssh
+    # Check if there are SSH key files to copy
+    if ls /home/agent/hostdir/biosense_ssh_keys/* 1> /dev/null 2>&1; then
+        mkdir -p "$SDMPT/home/biosense/.ssh"
+        for key_file in /home/agent/hostdir/biosense_ssh_keys/*
+        do
+            cp "$key_file" "$SDMPT/home/biosense/.ssh"
+        done
+        chown -R biosense:biosense "$SDMPT/home/biosense/.ssh"
+        chmod -R go-rwx "$SDMPT/home/biosense/.ssh"
 
-    logtoboth "Copied ssh keys to user biosense"
+        logtoboth "Copied SSH keys to user biosense"
+    else
+        logtoboth "No SSH keys found, skipping copy step"
+    fi
+
+    # Copy the wg0.conf template if it exists
+    if [ -f /home/agent/hostdir/config_files/wg0.conf ]; then
+        mkdir -p "$SDMPT/etc/wireguard"
+        cp /home/agent/hostdir/config_files/wg0.conf "$SDMPT/etc/wireguard"
+        chown -R root:root "$SDMPT/etc/wireguard"
+        chmod -R go-rwx "$SDMPT/etc/wireguard"
+        logtoboth "Copied wg0.conf template to /etc/wireguard"
+    else
+        logtoboth "wg0.conf template not found, skipping copy step"
+    fi
 
     logtoboth "* Plugin $pfx: Complete Phase 0"
 
@@ -70,32 +73,26 @@ elif [ "$phase" == "1" ]; then
     chmod +x /etc/profile.d/autologout.sh && \
     plugin_addnote "Automatic shell logout set to 10 minutes."
 
-    # Generate WireGuard keys
     WG_DIR="/etc/wireguard"
-    mkdir -p $WG_DIR
-    cd $WG_DIR
+    if [ -f "$WG_DIR/wg0.conf" ]; then
+        # Generate WireGuard keys
+        mkdir -p "$WG_DIR"
+        cd "$WG_DIR" || exit
+        umask 077
+        wg genkey | tee privatekey | wg pubkey > publickey
 
-    umask 077
-    wg genkey | tee privatekey | wg pubkey > publickey
+        PRIVATE_KEY=$(cat privatekey)
+        PUBLIC_KEY=$(cat publickey)
 
-    PRIVATE_KEY=$(cat privatekey)
-    PUBLIC_KEY=$(cat publickey)
+        # Update the client configuration
+        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "${WG_DIR}/wg0.conf"
+        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/wg0.conf"
 
-    # Create the client configuration
-    cat > ${WG_DIR}/wg0.conf <<EOL
-[Interface]
-PrivateKey = ${PRIVATE_KEY}
-Address = ${wg_ip}/16
-
-[Peer]
-PublicKey = ${server_public_key}
-Endpoint = ${server_ip}:51820
-AllowedIPs = 10.123.0.0/16
-PersistentKeepalive = 25
-EOL
-
-    # Generate the command to append to the server configuration
-    plugin_addnote "On the server run: sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
+        # Generate the command to append to the server configuration
+        plugin_addnote "On the server run: sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
+    else
+        logtoboth "wg0.conf not found in /etc/wireguard, skipping client configuration update"
+    fi
 
     cat > /etc/sdm/0piboot/010-config-eeprom.sh <<EOF
 #!/bin/bash
@@ -103,7 +100,7 @@ rpi-eeprom-config > /tmp/bootconf.txt
 echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
 sudo rpi-eeprom-config --apply /tmp/bootconf.txt
 EOF
-    chomd +x /etc/sdm/0piboot/010-config-eeprom.sh
+    chmod +x /etc/sdm/0piboot/010-config-eeprom.sh
 
     logtoboth "Created eeprom update script"
 
