@@ -8,7 +8,7 @@ function loadparams() {
 # Function to add a note to the end of the customization process
 function plugin_addnote() {
     local note="$1"
-    echo "$note" >> /etc/sdm/history
+    echo "$note" >>/etc/sdm/history
     echo "$note"
 }
 
@@ -34,7 +34,7 @@ if [ "$phase" == "0" ]; then
     logtoboth "* Plugin $pfx: Start Phase 0"
 
     # Check if there are SSH key files to copy
-    if ls /home/agent/hostdir/biosense_ssh_keys/* 1> /dev/null 2>&1; then
+    if ls /home/agent/hostdir/biosense_ssh_keys/* 1>/dev/null 2>&1; then
         mkdir -p "$SDMPT/home/biosense/.ssh"
         for key_file in /home/agent/hostdir/biosense_ssh_keys/*; do
             cp "$key_file" "$SDMPT/home/biosense/.ssh"
@@ -75,8 +75,8 @@ elif [ "$phase" == "1" ]; then
     logtoboth "* Plugin $pfx: Phase 1"
 
     # Set an autologout timer
-    echo "TMOUT=600" > /etc/profile.d/autologout.sh
-    echo "export TMOUT" >> /etc/profile.d/autologout.sh
+    echo "TMOUT=600" >/etc/profile.d/autologout.sh
+    echo "export TMOUT" >>/etc/profile.d/autologout.sh
     chmod +x /etc/profile.d/autologout.sh
     plugin_addnote "Automatic shell logout set to 10 minutes."
 
@@ -86,7 +86,7 @@ elif [ "$phase" == "1" ]; then
         mkdir -p "$WG_DIR"
         cd "$WG_DIR" || exit
         umask 077
-        wg genkey | tee privatekey | wg pubkey > publickey
+        wg genkey | tee privatekey | wg pubkey >publickey
 
         PRIVATE_KEY=$(cat privatekey)
         PUBLIC_KEY=$(cat publickey)
@@ -101,7 +101,7 @@ elif [ "$phase" == "1" ]; then
         logtoboth "wg0.conf not found in /etc/wireguard, skipping client configuration update"
     fi
 
-    cat > /etc/sdm/0piboot/010-config-eeprom.sh <<EOF
+    cat >/etc/sdm/0piboot/010-config-eeprom.sh <<EOF
 #!/bin/bash
 rpi-eeprom-config > /tmp/bootconf.txt
 echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
