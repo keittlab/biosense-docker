@@ -36,8 +36,7 @@ if [ "$phase" == "0" ]; then
     # Check if there are SSH key files to copy
     if ls /home/agent/hostdir/biosense_ssh_keys/* 1> /dev/null 2>&1; then
         mkdir -p "$SDMPT/home/biosense/.ssh"
-        for key_file in /home/agent/hostdir/biosense_ssh_keys/*
-        do
+        for key_file in /home/agent/hostdir/biosense_ssh_keys/*; do
             cp "$key_file" "$SDMPT/home/biosense/.ssh"
         done
         chown -R biosense:biosense "$SDMPT/home/biosense/.ssh"
@@ -59,7 +58,7 @@ if [ "$phase" == "0" ]; then
         logtoboth "wg0.conf template not found, skipping copy step"
     fi
 
-    # Copy the wg0.conf template if it exists
+    # Copy the 1piboot.conf template if it exists
     if [ -f /home/agent/hostdir/1piboot/1piboot.conf ]; then
         cp /home/agent/hostdir/1piboot/1piboot.conf "$SDMPT/usr/local/sdm/1piboot/1piboot.conf"
         logtoboth "Copied 1piboot.conf template to /usr/local/sdm/1piboot/1piboot.conf"
@@ -74,11 +73,11 @@ elif [ "$phase" == "1" ]; then
     # Phase 1 (in nspawn)
     #
     logtoboth "* Plugin $pfx: Phase 1"
-    
+
     # Set an autologout timer
-    echo "TMOUT=600" > /etc/profile.d/autologout.sh && \
-    echo "export TMOUT" >> /etc/profile.d/autologout.sh && \
-    chmod +x /etc/profile.d/autologout.sh && \
+    echo "TMOUT=600" > /etc/profile.d/autologout.sh
+    echo "export TMOUT" >> /etc/profile.d/autologout.sh
+    chmod +x /etc/profile.d/autologout.sh
     plugin_addnote "Automatic shell logout set to 10 minutes."
 
     WG_DIR="/etc/wireguard"
@@ -130,6 +129,15 @@ elif [ "$phase" == "post-install" ]; then
     # Enable and start WireGuard
     systemctl enable wg-quick@wg0
     systemctl start wg-quick@wg0
+
+    # Create a virtual environment and install packages from requirements.txt
+    sudo -u biosense bash <<EOF
+    python3 -m venv /home/biosense/biosense_venv
+    source /home/biosense/biosense_venv/bin/activate
+    /home/biosense/biosense_venv/bin/pip install -r /home/agent/hostdir/python/requirements.txt
+EOF
+
+    logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi

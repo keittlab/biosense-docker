@@ -19,6 +19,7 @@ Currently, you need to:
 
 1. Place the biosense users public key into `biosense_ssh_keys/authorized_keys`
 1. Add a template for the `wg0.conf` file in `config_files/wg0.conf`
+1. Fill in the server wireguard public key in `wg0.conf`
 
 These are not part of the github repo because I don't want the keys uploaded when it goes public.
 
