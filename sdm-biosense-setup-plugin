@@ -49,14 +49,23 @@ if [ "$phase" == "0" ]; then
     fi
 
     # Copy the wg0.conf template if it exists
-    if [ -f /home/agent/hostdir/config_files/wg0.conf ]; then
+    if [ -f /home/agent/hostdir/wireguard/wg0.conf ]; then
         mkdir -p "$SDMPT/etc/wireguard"
-        cp /home/agent/hostdir/config_files/wg0.conf "$SDMPT/etc/wireguard"
+        cp /home/agent/hostdir/wireguard/wg0.conf "$SDMPT/etc/wireguard"
         chown -R root:root "$SDMPT/etc/wireguard"
         chmod -R go-rwx "$SDMPT/etc/wireguard"
         logtoboth "Copied wg0.conf template to /etc/wireguard"
     else
         logtoboth "wg0.conf template not found, skipping copy step"
+    fi
+
+    # Copy the wg0.conf template if it exists
+    if [ -f /home/agent/hostdir/1piboot/1piboot.conf ]; then
+        mkdir -p "$SDMPT/usr/local/sdm/1piboot/1piboot.conf"
+        cp /home/agent/hostdir/1piboot/1piboot.conf "$SDMPT/usr/local/sdm/1piboot/1piboot.conf"
+        logtoboth "Copied 1piboot.conf template to /usr/local/sdm/1piboot/1piboot.conf"
+    else
+        logtoboth "1piboot.conf template not found, skipping copy step"
     fi
 
     logtoboth "* Plugin $pfx: Complete Phase 0"
