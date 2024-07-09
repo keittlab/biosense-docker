@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# Function to display usage
+usage() {
+  echo "Usage: $0 [-i | --ips-only] [-f | --filter FILTERS]"
+  echo "  -i, --ips-only          Output only the IP addresses of the connected clients"
+  echo "  -f, --filter FILTERS    Filter IP addresses by specified patterns (comma-separated)"
+  echo "                          Example: -f '1,2-10' matches IPs like 10.123.1.x, 10.123.2.x to 10.123.10.x"
+  echo "  -h, --help              Display this help message"
+  exit 1
+}
+
+# Function to match IP against filters
+ip_matches_filter() {
+  local ip="$1"
+  local filters="$2"
+  local base_ip="10.123."
+  local filter_matched=false
+
+  IFS=, read -ra filter_list <<< "$filters"
+  for filter in "${filter_list[@]}"; do
+    if [[ "$filter" == *-* ]]; then
+      IFS=- read range_start range_end <<< "$filter"
+      IFS=. read -r i1 i2 i3 i4 <<< "$ip"
+      if [[ "$i3" -ge "$range_start" && "$i3" -le "$range_end" ]]; then
+        filter_matched=true
+        break
+      fi
+    else
+      IFS=. read -r i1 i2 i3 i4 <<< "$ip"
+      if [[ "$i3" == "$filter" ]]; then
+        filter_matched=true
+        break
+      fi
+    fi
+  done
+
+  $filter_matched && echo "$ip"
+}
+
+# Parse command-line arguments
+IPS_ONLY=false
+FILTERS=""
+while [[ "$1" != "" ]]; do
+  case $1 in
+    -i | --ips-only )  IPS_ONLY=true
+                       ;;
+    -f | --filter )    shift
+                       FILTERS="$1"
+                       ;;
+    -h | --help )      usage
+                       ;;
+    * )                usage
+                       ;;
+  esac
+  shift
+done
+
+# Get the list of clients connected to the WireGuard interface
+WG_INTERFACE="wg0"
+
+# Use wg command to get the allowed IPs
+WG_STATUS=$(wg show $WG_INTERFACE allowed-ips)
+
+# Extract the IP addresses
+CLIENT_IPS=$(echo "$WG_STATUS" | grep -oP '(?<=allowed ips: )[\d\.\/]+')
+
+# Filter IPs if filter option is provided
+if [ -n "$FILTERS" ]; then
+  CLIENT_IPS=$(echo "$CLIENT_IPS" | while read -r ip; do ip_matches_filter "$ip" "$FILTERS"; done)
+fi
+
+if [ "$IPS_ONLY" = true ]; then
+  # Print the client IP addresses
+  echo "$CLIENT_IPS"
+else
+  # Use wg command to get the current status
+  WG_STATUS=$(wg show $WG_INTERFACE)
+
+  # Extract the client information
+  CLIENTS=$(echo "$WG_STATUS" | grep -E "peer|allowed ips|latest handshake|transfer" | sed 's/^/  /')
+
+  # Print the client list
+  echo "Connected clients on interface $WG_INTERFACE:"
+  echo "$CLIENTS"
+
+  # If filter option is provided, also print the filtered IPs
+  if [ -n "$FILTERS" ]; then
+    echo ""
+    echo "Filtered client IPs:"
+    echo "$CLIENT_IPS"
+  fi
+fi
