@@ -61,7 +61,6 @@ if [ "$phase" == "0" ]; then
 
     # Copy the wg0.conf template if it exists
     if [ -f /home/agent/hostdir/1piboot/1piboot.conf ]; then
-        mkdir -p "$SDMPT/usr/local/sdm/1piboot/1piboot.conf"
         cp /home/agent/hostdir/1piboot/1piboot.conf "$SDMPT/usr/local/sdm/1piboot/1piboot.conf"
         logtoboth "Copied 1piboot.conf template to /usr/local/sdm/1piboot/1piboot.conf"
     else
