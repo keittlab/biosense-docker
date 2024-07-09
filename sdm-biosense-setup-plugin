@@ -66,6 +66,14 @@ if [ "$phase" == "0" ]; then
         logtoboth "1piboot.conf template not found, skipping copy step"
     fi
 
+       # Copy the requirements.txt file if it exists
+    if [ -f /home/agent/hostdir/python/requirements.txt ]; then
+        cp /home/agent/hostdir/python/requirements.txt "$SDMPT/home/biosense"
+        logtoboth "Copied requirements.txt file to /home/biosense/requirements.txt"
+    else
+        logtoboth "requirements.txt file not found, skipping copy step"
+    fi
+
     logtoboth "* Plugin $pfx: Complete Phase 0"
 
 elif [ "$phase" == "1" ]; then
@@ -73,6 +81,10 @@ elif [ "$phase" == "1" ]; then
     # Phase 1 (in nspawn)
     #
     logtoboth "* Plugin $pfx: Phase 1"
+
+    # Change locale
+    sudo localectrl set-locale C.UTF-8
+    logtoboth "* Set locale to C.UTF-8"
 
     # Set an autologout timer
     echo "TMOUT=600" >/etc/profile.d/autologout.sh
@@ -134,7 +146,10 @@ elif [ "$phase" == "post-install" ]; then
     sudo -u biosense bash <<EOF
     python3 -m venv /home/biosense/biosense_venv
     source /home/biosense/biosense_venv/bin/activate
-    /home/biosense/biosense_venv/bin/pip install -r /home/agent/hostdir/python/requirements.txt
+    if [ -f /home/biosense/requirements.txt ]; then
+        /home/biosense/biosense_venv/bin/pip install -r /home/biosense/requirements.txt
+        rm -f /home/biosense/requirements.txt
+    fi
 EOF
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"

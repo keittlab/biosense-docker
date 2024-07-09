@@ -9,7 +9,7 @@ Here is an example:
 ./customize_image --wg-ip 10.123.0.2 --aptcache 192.168.1.21 
 ```
 
-After customization, an image file will be in the `customized_images` directory. The hostname of the device will be `biosense_0_2` and its wireguard ip number will be `10.123.0.2`. The customized image will have the hostname prepended. Note that you can use `--save-config`, `--config-file`, and `--increment-ip` to create a series of images.
+After customization, an image file will be in the `customized_images` directory. The hostname of the device will be `biosense_0_2` and its wireguard ip number will be `10.123.0.2`. The customized image will have the hostname prepended. Note that you can use `--save-config`, `--config-file`, `--update-config`, and `--increment-ip` to create a series of images.
 
 The current username and password are `biosense` and `biosense`. I plan to change this so that users will need to use an authentication app to login. The device will be able to communicate with the server, but only the server can ssh to the device, so we will need to run scripts on the server to retrieve any results.
 
@@ -18,7 +18,7 @@ The `--aptcache` option will speed up the installation and updating of raspberry
 Currently, you need to:
 
 1. Place the biosense users public key into `biosense_ssh_keys/authorized_keys`
-1. Add a template for the `wg0.conf` file in `config_files/wg0.conf`
+1. Add a template for the `wg0.conf` file in `wireguard/wg0.conf`
 1. Fill in the server wireguard public key in `wg0.conf`
 
 These are not part of the github repo because I don't want the keys uploaded when it goes public.

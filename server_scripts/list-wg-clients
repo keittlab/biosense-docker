@@ -5,7 +5,9 @@ usage() {
   echo "Usage: $0 [-i | --ips-only] [-f | --filter FILTERS]"
   echo "  -i, --ips-only          Output only the IP addresses of the connected clients"
   echo "  -f, --filter FILTERS    Filter IP addresses by specified patterns (comma-separated)"
-  echo "                          Example: -f '1,2-10' matches IPs like 10.123.1.x, 10.123.2.x to 10.123.10.x"
+  echo "                          Example: -f '3' matches IPs like x.x.x.3"
+  echo "                          Example: -f '0.3' matches IPs like x.x.0.3"
+  echo "                          Example: -f '0-1.0-255' matches IPs like x.x.0.x and x.x.1.x"
   echo "  -h, --help              Display this help message"
   exit 1
 }
@@ -14,28 +16,52 @@ usage() {
 ip_matches_filter() {
   local ip="$1"
   local filters="$2"
-  local base_ip="10.123."
-  local filter_matched=false
+
+  IFS=. read -r i1 i2 i3 i4 <<< "$ip"
 
   IFS=, read -ra filter_list <<< "$filters"
   for filter in "${filter_list[@]}"; do
-    if [[ "$filter" == *-* ]]; then
-      IFS=- read range_start range_end <<< "$filter"
-      IFS=. read -r i1 i2 i3 i4 <<< "$ip"
-      if [[ "$i3" -ge "$range_start" && "$i3" -le "$range_end" ]]; then
-        filter_matched=true
-        break
+    if [[ "$filter" == *.* ]]; then
+      IFS=. read -r f3 f4 <<< "$filter"
+      if [[ "$f3" == *-* ]]; then
+        IFS=- read f3_start f3_end <<< "$f3"
+        if [[ "$i3" -ge "$f3_start" && "$i3" -le "$f3_end" ]]; then
+          if [[ "$f4" == *-* ]]; then
+            IFS=- read f4_start f4_end <<< "$f4"
+            if [[ "$i4" -ge "$f4_start" && "$i4" -le "$f4_end" ]]; then
+              echo "$ip"
+              return
+            fi
+          elif [[ "$i4" == "$f4" ]]; then
+            echo "$ip"
+            return
+          fi
+        fi
+      elif [[ "$i3" == "$f3" ]]; then
+        if [[ "$f4" == *-* ]]; then
+          IFS=- read f4_start f4_end <<< "$f4"
+          if [[ "$i4" -ge "$f4_start" && "$i4" -le "$f4_end" ]]; then
+            echo "$ip"
+            return
+          fi
+        elif [[ "$i4" == "$f4" ]]; then
+          echo "$ip"
+          return
+        fi
+      fi
+    elif [[ "$filter" == *-* ]]; then
+      IFS=- read f3_start f3_end <<< "$filter"
+      if [[ "$i3" -ge "$f3_start" && "$i3" -le "$f3_end" ]]; then
+        echo "$ip"
+        return
       fi
     else
-      IFS=. read -r i1 i2 i3 i4 <<< "$ip"
-      if [[ "$i3" == "$filter" ]]; then
-        filter_matched=true
-        break
+      if [[ "$i4" == "$filter" ]]; then
+        echo "$ip"
+        return
       fi
     fi
   done
-
-  $filter_matched && echo "$ip"
 }
 
 # Parse command-line arguments
@@ -62,8 +88,8 @@ WG_INTERFACE="wg0"
 # Use wg command to get the allowed IPs
 WG_STATUS=$(wg show $WG_INTERFACE allowed-ips)
 
-# Extract the IP addresses
-CLIENT_IPS=$(echo "$WG_STATUS" | grep -oP '(\d+\.\d+\.\d+\.\d+\/\d+)')
+# Extract the IP addresses and strip the subnet mask
+CLIENT_IPS=$(echo "$WG_STATUS" | grep -oP '(\d+\.\d+\.\d+\.\d+)/\d+' | sed 's|/.*||')
 
 # Filter IPs if filter option is provided
 if [ -n "$FILTERS" ]; then
@@ -71,23 +97,43 @@ if [ -n "$FILTERS" ]; then
 fi
 
 if [ "$IPS_ONLY" = true ]; then
-  # Print the client IP addresses
-  echo "$CLIENT_IPS"
+  # Print the client IP addresses if there are any
+  if [ -n "$CLIENT_IPS" ]; then
+    echo "$CLIENT_IPS"
+  fi
 else
   # Use wg command to get the current status
   WG_STATUS=$(wg show $WG_INTERFACE)
 
-  # Extract the client information
-  CLIENTS=$(echo "$WG_STATUS" | grep -E "peer|allowed ips|latest handshake|transfer" | sed 's/^/  /')
-
-  # Print the client list
-  echo "Connected clients on interface $WG_INTERFACE:"
-  echo "$CLIENTS"
-
-  # If filter option is provided, also print the filtered IPs
   if [ -n "$FILTERS" ]; then
-    echo ""
-    echo "Filtered client IPs:"
-    echo "$CLIENT_IPS"
+    # Filter the full status output based on the filtered IPs
+    FILTERED_STATUS=""
+    for ip in $CLIENT_IPS; do
+      FILTERED_STATUS+=$(echo "$WG_STATUS" | awk -v ip="$ip" '
+        /peer/ {peer=$0; peer_printed=0}
+        /allowed ips: / {
+          if ($3 ~ ip) {
+            if (!peer_printed) {
+              print peer
+              peer_printed=1
+            }
+            print $0
+            getline
+            print $0
+            getline
+            print $0
+          }
+        }
+      ')
+    done
+    if [ -n "$FILTERED_STATUS" ]; then
+      echo "Connected clients on interface $WG_INTERFACE:"
+      echo "$FILTERED_STATUS"
+    fi
+  else
+    # Extract the client information
+    CLIENTS=$(echo "$WG_STATUS" | grep -E "peer|allowed ips|latest handshake|transfer" | sed 's/^/  /')
+    echo "Connected clients on interface $WG_INTERFACE:"
+    echo "$CLIENTS"
   fi
 fi

@@ -291,7 +291,7 @@ if [[ ${DISABLE_TRIGGERHAPPY} -eq 1 ]]; then
 fi
 
 # Construct the sdm command
-SDM_COMMAND="sudo sdm --customize --extend --xmb 512"
+SDM_COMMAND="sudo sdm --customize --extend --xmb 1024"
 if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
 fi
