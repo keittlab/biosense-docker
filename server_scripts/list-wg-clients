@@ -63,7 +63,7 @@ WG_INTERFACE="wg0"
 WG_STATUS=$(wg show $WG_INTERFACE allowed-ips)
 
 # Extract the IP addresses
-CLIENT_IPS=$(echo "$WG_STATUS" | grep -oP '(?<=allowed ips: )[\d\.\/]+')
+CLIENT_IPS=$(echo "$WG_STATUS" | grep -oP '(\d+\.\d+\.\d+\.\d+\/\d+)')
 
 # Filter IPs if filter option is provided
 if [ -n "$FILTERS" ]; then
