@@ -98,7 +98,7 @@ elif [ "$phase" == "1" ]; then
 #!/bin/bash
 rpi-eeprom-config > /tmp/bootconf.txt
 echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
-echo "BOOT_ORDER=0xf416" >> /tmp/bootconf.txt
+echo "BOOT_ORDER=0xf641" >> /tmp/bootconf.txt
 sudo rpi-eeprom-config --apply /tmp/bootconf.txt
 EOF
     chmod +x /etc/sdm/0piboot/010-config-eeprom.sh
