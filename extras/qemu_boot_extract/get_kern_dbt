@@ -1,0 +1,77 @@
+#!/bin/bash
+
+set -e
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 <path/to/raspios_image.img>"
+    exit 1
+}
+
+# Function to clean up mount points
+cleanup() {
+    if mount | grep -q "$MOUNT_DIR"; then
+        sudo umount "$MOUNT_DIR" || true
+    fi
+    if [ -n "$DISK_DEV" ]; then
+        hdiutil detach "$(echo $DISK_DEV | sed 's/s[0-9]*$//')" || true
+    fi
+    rm -rf "$MOUNT_DIR"
+}
+
+# Ensure the script is called with one argument
+if [ "$#" -ne 1 ]; then
+    usage
+fi
+
+IMAGE_FILE=$1
+
+# Check if the specified image file exists
+if [ ! -f "$IMAGE_FILE" ]; then
+    echo "Error: File '$IMAGE_FILE' not found."
+    exit 1
+fi
+
+# Create a temporary directory for mounting
+MOUNT_DIR=$(mktemp -d)
+trap cleanup EXIT
+
+# Extract the base name of the image file to create a unique directory
+IMAGE_BASENAME=$(basename "$IMAGE_FILE" .img)
+OUTPUT_DIR="./${IMAGE_BASENAME}_files"
+mkdir -p "$OUTPUT_DIR"
+
+# Mount the image to the temporary directory
+echo "Mounting the image..."
+ATTACH_OUTPUT=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$IMAGE_FILE")
+DISK_DEV=$(echo "$ATTACH_OUTPUT" | grep "/dev/disk" | grep "FDisk_partition_scheme" | awk '{print $1}')
+BOOT_PARTITION="${DISK_DEV}s1"
+
+if [ -z "$DISK_DEV" ]; then
+    echo "Error: Failed to find the disk device."
+    exit 1
+fi
+
+sudo mount -t msdos "$BOOT_PARTITION" "$MOUNT_DIR"
+
+# Verify the path to kernel and DTB files
+KERNEL_FILES=$(find "$MOUNT_DIR" -name 'kernel*.img')
+DTB_FILES=$(find "$MOUNT_DIR" -name '*.dtb')
+
+# Copy kernel and DTB files to the unique subdirectory
+echo "Copying kernel and DTB files to $OUTPUT_DIR..."
+if [ -n "$KERNEL_FILES" ]; then
+    cp $KERNEL_FILES "$OUTPUT_DIR"
+else
+    echo "Kernel images not found"
+fi
+
+if [ -n "$DTB_FILES" ]; then
+    cp $DTB_FILES "$OUTPUT_DIR"
+else
+    echo "DTB files not found"
+fi
+
+echo "Kernel and DTB files copied successfully to $OUTPUT_DIR."
+
+exit 0
