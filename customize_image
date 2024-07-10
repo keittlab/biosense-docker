@@ -20,7 +20,7 @@ WIFI_PASSWORD=""
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--config-file <file>] [--save-config <file>] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--32bit] [--update-config] [--increment-ip] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>]"
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--config-file <file>] [--save-config <file>] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--use32bit] [--update-config] [--increment-ip] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>]"
     echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (optional)"
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
     echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
@@ -34,7 +34,7 @@ usage() {
     echo "  --disable-triggerhappy    : Disable Triggerhappy in the customized image."
     echo "  --debug                   : Run sdm without --batch option."
     echo "  --aptcache <cache_address>: Use the specified apt cache server."
-    echo "  --32bit                   : Use 32-bit images instead of the default 64-bit images."
+    echo "  --use32bit                : Use 32-bit images instead of the default 64-bit images."
     echo "  --increment-ip            : Increment the IP number based on the last IP in the configuration file."
     echo "  --wifi-country <countryname> : Specify the name of the country to use for the WiFi Country setting."
     echo "  --wifi-ssid <ssid>        : Specifies the WiFi SSID to enable."
@@ -132,15 +132,12 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --disable-wifi)
             DISABLE_WIFI=1
-            shift
             ;;
         --disable-bluetooth)
             DISABLE_BLUETOOTH=1
-            shift
             ;;
         --disable-triggerhappy)
             DISABLE_TRIGGERHAPPY=1
-            shift
             ;;
         --debug)
             DEBUG=1
@@ -149,7 +146,7 @@ while [[ "$#" -gt 0 ]]; do
             APTCACHE=$2
             shift
             ;;
-        --32bit)
+        --use32bit)
             USE_32_BIT=1
             ;;
         --increment-ip)

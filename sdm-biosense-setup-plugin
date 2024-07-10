@@ -24,7 +24,7 @@ loadparams
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
 
 # Log the values for debugging
-logtoboth "wg_ip=${wg_ip}"
+logtoboth "Plugin $pfx: wg_ip=${wg_ip}"
 
 if [ "$phase" == "0" ]; then
     #
@@ -39,9 +39,6 @@ if [ "$phase" == "0" ]; then
         for key_file in /home/agent/hostdir/biosense_ssh_keys/*; do
             cp "$key_file" "$SDMPT/home/biosense/.ssh"
         done
-        chown -R biosense:biosense "$SDMPT/home/biosense/.ssh"
-        chmod -R go-rwx "$SDMPT/home/biosense/.ssh"
-
         logtoboth "Copied SSH keys to user biosense"
     else
         logtoboth "No SSH keys found, skipping copy step"
@@ -58,15 +55,7 @@ if [ "$phase" == "0" ]; then
         logtoboth "wg0.conf template not found, skipping copy step"
     fi
 
-    # Copy the 1piboot.conf template if it exists
-    if [ -f /home/agent/hostdir/1piboot/1piboot.conf ]; then
-        cp /home/agent/hostdir/1piboot/1piboot.conf "$SDMPT/usr/local/sdm/1piboot/1piboot.conf"
-        logtoboth "Copied 1piboot.conf template to /usr/local/sdm/1piboot/1piboot.conf"
-    else
-        logtoboth "1piboot.conf template not found, skipping copy step"
-    fi
-
-       # Copy the requirements.txt file if it exists
+    # Copy the requirements.txt file if it exists
     if [ -f /home/agent/hostdir/python/requirements.txt ]; then
         cp /home/agent/hostdir/python/requirements.txt "$SDMPT/home/biosense"
         logtoboth "Copied requirements.txt file to /home/biosense/requirements.txt"
@@ -129,8 +118,11 @@ EOF
     raspi-config nonint do_change_locale C.UTF-8 && \
     logtoboth "Set locale to C.UTF-8"
 
-    # Enable and start WireGuard
-    # systemctl enable wg-quick@wg0
+    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' && \
+    logtoboth "Set keymap to Generic 104-key PC"
+
+    raspi-config nonint do_i2c 0 && \
+    logtoboth "Enabled i2c"
 
     # Create a virtual environment and install packages from requirements.txt
     sudo -u biosense bash <<EOF
@@ -151,6 +143,13 @@ elif [ "$phase" == "post-install" ]; then
     # Post-install edits
     #
     logtoboth "* Plugin $pfx: Phase post-install"
+
+    chown -R biosense:biosense /home/biosense/.ssh
+    chmod -R go-rwx /home/biosense/.ssh
+    
+    sudo systemctrl enable wg-quick@wg0 && \
+    logtoboth "Enabled wg-quick@wg0 service"
+
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
 
