@@ -144,8 +144,12 @@ elif [ "$phase" == "post-install" ]; then
     chown -R biosense:biosense /home/biosense/.ssh
     chmod -R go-rwx /home/biosense/.ssh
     
-    sudo systemctrl enable wg-quick@wg0 && \
+    sudo systemctl enable wg-quick@wg0 && \
     logtoboth "Enabled wg-quick@wg0 service"
+
+    # This is not needed and does not do anything anyway
+    sudo systemctl start wg-quick@wg0 && \
+    logtoboth "Started wg-quick@wg0 service"
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
