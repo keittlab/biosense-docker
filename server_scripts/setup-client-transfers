@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Define the necessary variables
+WG_INTERFACE="wg0"
+DEST_DIR="/home/biosense/sensor-data"
+SSH_KEY="/home/biosense/.ssh/id_rsa"
+SCRIPT_PATH="/home/biosense/scripts/transfer-client-files"
+LOG_FILE="/var/log/transfer-client-files.log"
+SUDOERS_FILE="/etc/sudoers.d/biosense_wg"
+
+# Ensure the script is run as root
+if [ "$(whoami)" != "root" ]; then
+    echo "This script must be run as root"
+    exit 1
+fi
+
+# Create or update the sudoers file for biosense to run wg show without a password
+if [ -f "$SUDOERS_FILE" ]; then
+    echo "$SUDOERS_FILE exists, ensuring the correct entry is present."
+    if ! grep -q "wg show" "$SUDOERS_FILE"; then
+        echo "Adding entry to $SUDOERS_FILE."
+        echo "biosense ALL=(ALL) NOPASSWD: /usr/bin/wg show *" >> "$SUDOERS_FILE"
+    else
+        echo "Required entry already exists in $SUDOERS_FILE."
+    fi
+else
+    echo "Creating $SUDOERS_FILE."
+    echo "biosense ALL=(ALL) NOPASSWD: /usr/bin/wg show *" > "$SUDOERS_FILE"
+    chmod 440 "$SUDOERS_FILE"
+fi
+
+# Create the destination directory if it doesn't exist
+mkdir -p $DEST_DIR
+chown biosense:biosense $DEST_DIR
+
+# Create the log file and set ownership to biosense
+if [ ! -f "$LOG_FILE" ]; then
+    touch $LOG_FILE
+    chown biosense:adm $LOG_FILE
+    chmod 640 $LOG_FILE
+fi
+
+# Ensure the transfer-client-files script is executable and owned by biosense
+chmod +x $SCRIPT_PATH
+chown biosense:biosense $SCRIPT_PATH
+
+# Check if there is an existing crontab for biosense
+if crontab -u biosense -l &>/dev/null; then
+    echo "Appending to existing crontab for biosense."
+    (crontab -u biosense -l; echo "0 * * * * $SCRIPT_PATH") | crontab -u biosense -
+else
+    echo "Creating new crontab for biosense."
+    echo "0 * * * * $SCRIPT_PATH" | crontab -u biosense -
+fi
+
+echo "Server-side configuration complete."

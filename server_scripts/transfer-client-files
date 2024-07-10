@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Run as user biosense
+if [ "$(whoami)" != "biosense" ]; then
+    echo "This script must be run as user biosense"
+    exit 1
+fi
+
+# WireGuard interface name
+WG_INTERFACE="wg0"
+
+# Directory to store sensor data
+DEST_DIR="/home/biosense/sensor-data"
+
+# Path to the SSH private key
+SSH_KEY="/home/biosense/.ssh/id_rsa"
+
+# Log file path
+LOG_FILE="/var/log/transfer-client-files.log"
+
+# Log the start of the script
+{
+    echo "===================="
+    echo "Starting transfer-client-files script at $(date)"
+} >> $LOG_FILE
+
+# Get the list of allowed IPs from the WireGuard interface using sudo
+CLIENT_IPS=$(sudo wg show $WG_INTERFACE allowed-ips 2>&1 | awk '{print $2}' | sed 's|/32||')
+
+# Check if CLIENT_IPS is empty and exit if it is
+if [ -z "$CLIENT_IPS" ]; then
+    echo "No clients found or permission issue with 'wg show'. Exiting." >> $LOG_FILE
+    exit 1
+fi
+
+# Iterate over each client IP
+for CLIENT_IP in $CLIENT_IPS; do
+  # Extract the parts of the IP address
+  IFS='.' read -r -a IP_PARTS <<< "$CLIENT_IP"
+  X="${IP_PARTS[2]}"
+  Y="${IP_PARTS[3]}"
+
+  # Derive the client hostname from the IP address
+  CLIENT_NAME="biosense-$X-$Y"
+
+  # Define the source directory on the client
+  SRC_DIR="biosense@$CLIENT_IP:/home/biosense/dataqueue/"
+
+  # Create the client's directory if it doesn't exist
+  mkdir -p "$DEST_DIR/$CLIENT_NAME"
+
+  # Use rsync to transfer the files from the client to the server with checksum verification and compression
+  # Suppress known hosts warnings and log only errors
+  rsync -azq -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --remove-source-files "$SRC_DIR" "$DEST_DIR/$CLIENT_NAME" 2>> $LOG_FILE
+
+  # Log the transfer
+  if [ $? -eq 0 ]; then
+    echo "Transferred files from $CLIENT_NAME ($CLIENT_IP) to $DEST_DIR/$CLIENT_NAME on $(date)" >> $LOG_FILE
+  else
+    echo "Failed to transfer files from $CLIENT_NAME ($CLIENT_IP) to $DEST_DIR/$CLIENT_NAME on $(date)" >> $LOG_FILE
+  fi
+done
+
+# Log the completion of the script
+{
+    echo "Completed transfer-client-files script at $(date)"
+    echo "===================="
+} >> $LOG_FILE
