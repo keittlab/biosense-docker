@@ -82,10 +82,6 @@ elif [ "$phase" == "1" ]; then
     #
     logtoboth "* Plugin $pfx: Phase 1"
 
-    # Change locale
-    sudo localectrl set-locale C.UTF-8
-    logtoboth "* Set locale to C.UTF-8"
-
     # Set an autologout timer
     echo "TMOUT=600" >/etc/profile.d/autologout.sh
     echo "export TMOUT" >>/etc/profile.d/autologout.sh
@@ -130,6 +126,24 @@ EOF
 
     logtoboth "Created dataqueue and datastore directories"
 
+    raspi-config nonint do_change_locale C.UTF-8 && \
+    logtoboth "Set locale to C.UTF-8"
+
+    # Enable and start WireGuard
+    # systemctl enable wg-quick@wg0
+
+    # Create a virtual environment and install packages from requirements.txt
+    sudo -u biosense bash <<EOF
+    python3 -m venv /home/biosense/biosense_venv
+    source /home/biosense/biosense_venv/bin/activate
+    if [ -f /home/biosense/requirements.txt ]; then
+        /home/biosense/biosense_venv/bin/pip install -r /home/biosense/requirements.txt && \
+        rm -f /home/biosense/requirements.txt
+    fi
+EOF
+
+    logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
+
     logtoboth "* Plugin $pfx: Phase 1 completed"
 
 elif [ "$phase" == "post-install" ]; then
@@ -137,23 +151,6 @@ elif [ "$phase" == "post-install" ]; then
     # Post-install edits
     #
     logtoboth "* Plugin $pfx: Phase post-install"
-
-    # Enable and start WireGuard
-    systemctl enable wg-quick@wg0
-    systemctl start wg-quick@wg0
-
-    # Create a virtual environment and install packages from requirements.txt
-    sudo -u biosense bash <<EOF
-    python3 -m venv /home/biosense/biosense_venv
-    source /home/biosense/biosense_venv/bin/activate
-    if [ -f /home/biosense/requirements.txt ]; then
-        /home/biosense/biosense_venv/bin/pip install -r /home/biosense/requirements.txt
-        rm -f /home/biosense/requirements.txt
-    fi
-EOF
-
-    logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
-
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
 

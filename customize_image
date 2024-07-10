@@ -238,7 +238,7 @@ fi
 
 # Generate hostname from WireGuard IP
 IFS='.' read -r -a ip_parts <<< "${WG_IP}"
-HOSTNAME="biosense_${ip_parts[2]}_${ip_parts[3]}"
+HOSTNAME="biosense-${ip_parts[2]}-${ip_parts[3]}"
 
 # Check if the image file exists
 if [[ ! -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" ]]; then
