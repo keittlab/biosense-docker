@@ -35,7 +35,7 @@ apps:"apps=wireguard,audacity,alsa-utils,sox,ffmpeg,libpython3-all-dev"
 # Custom plugin
 # sdm-biosense-setup-plugin
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#raspiconfig
-# raspiconfig:"boot_behavior=B1|i2c=0|serial=0"
+raspiconfig:"i2c=0"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#git-clone
 #git-clone:"repo=https://github.com/suptronics/x120x.git|gitdir=/home/biosense/suptronics"
 

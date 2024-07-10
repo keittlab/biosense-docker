@@ -121,9 +121,6 @@ EOF
     raspi-config nonint do_configure_keyboard 'Generic 104-key PC' && \
     logtoboth "Set keymap to Generic 104-key PC"
 
-    raspi-config nonint do_i2c 0 && \
-    logtoboth "Enabled i2c"
-
     # Create a virtual environment and install packages from requirements.txt
     sudo -u biosense bash <<EOF
     python3 -m venv /home/biosense/biosense_venv
