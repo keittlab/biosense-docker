@@ -15,7 +15,7 @@ DEST_DIR="/home/biosense/sensor-data"
 # Path to the SSH private key
 SSH_KEY="/home/biosense/.ssh/id_rsa"
 
-# Log file path
+# Log file path -- set to /dev/null to turn off
 LOG_FILE="/var/log/transfer-client-files.log"
 
 # Log the start of the script
@@ -51,7 +51,7 @@ for CLIENT_IP in $CLIENT_IPS; do
 
   # Use rsync to transfer the files from the client to the server with checksum verification and compression
   # Suppress known hosts warnings and log only errors
-  rsync -azq -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --remove-source-files "$SRC_DIR" "$DEST_DIR/$CLIENT_NAME" 2>> $LOG_FILE
+  rsync -azqc -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --remove-source-files "$SRC_DIR" "$DEST_DIR/$CLIENT_NAME" 2>> $LOG_FILE
 
   # Log the transfer
   if [ $? -eq 0 ]; then

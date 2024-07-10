@@ -45,6 +45,7 @@ chmod +x $SCRIPT_PATH
 chown biosense:biosense $SCRIPT_PATH
 
 # Check if there is an existing crontab for biosense
+# TODO: Fix me -- this should check for the existing entry
 if crontab -u biosense -l &>/dev/null; then
     echo "Appending to existing crontab for biosense."
     (crontab -u biosense -l; echo "0 * * * * $SCRIPT_PATH") | crontab -u biosense -
