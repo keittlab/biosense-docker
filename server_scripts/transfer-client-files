@@ -7,7 +7,7 @@ if [ "$(whoami)" != "biosense" ]; then
 fi
 
 # WireGuard interface name
-WG_INTERFACE="wg0"
+WG_INTERFACE="biosense"
 
 # Directory to store sensor data
 DEST_DIR="/home/biosense/sensor-data"

@@ -20,6 +20,9 @@ vldargs="|wg_ip|"
 reqargs="|wg_ip|"
 loadparams
 
+# Set the WireGuard interface name
+WG_INTERFACE="biosense"
+
 # Extract arguments
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
 
@@ -44,15 +47,15 @@ if [ "$phase" == "0" ]; then
         logtoboth "No SSH keys found, skipping copy step"
     fi
 
-    # Copy the wg0.conf template if it exists
-    if [ -f /home/agent/hostdir/wireguard/wg0.conf ]; then
+    # Copy the WireGuard configuration template if it exists
+    if [ -f /home/agent/hostdir/wireguard/template.conf ]; then
         mkdir -p "$SDMPT/etc/wireguard"
-        cp /home/agent/hostdir/wireguard/wg0.conf "$SDMPT/etc/wireguard"
+        cp /home/agent/hostdir/wireguard/template.conf "$SDMPT/etc/wireguard/${WG_INTERFACE}.conf"
         chown -R root:root "$SDMPT/etc/wireguard"
         chmod -R go-rwx "$SDMPT/etc/wireguard"
-        logtoboth "Copied wg0.conf template to /etc/wireguard"
+        logtoboth "Copied template.conf to /etc/wireguard/${WG_INTERFACE}.conf"
     else
-        logtoboth "wg0.conf template not found, skipping copy step"
+        logtoboth "template.conf not found, skipping copy step"
     fi
 
     # Copy the requirements.txt file if it exists
@@ -75,10 +78,10 @@ elif [ "$phase" == "1" ]; then
     echo "TMOUT=600" >/etc/profile.d/autologout.sh
     echo "export TMOUT" >>/etc/profile.d/autologout.sh
     chmod +x /etc/profile.d/autologout.sh
-    plugin_addnote "Automatic shell logout set to 10 minutes."
+    logtoboth "Automatic shell logout set to 10 minutes."
 
     WG_DIR="/etc/wireguard"
-    if [ -f "$WG_DIR/wg0.conf" ]; then
+    if [ -f "$WG_DIR/${WG_INTERFACE}.conf" ]; then
         # Generate WireGuard keys
         mkdir -p "$WG_DIR"
         cd "$WG_DIR" || exit
@@ -89,22 +92,23 @@ elif [ "$phase" == "1" ]; then
         PUBLIC_KEY=$(cat publickey)
 
         # Update the client configuration
-        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "${WG_DIR}/wg0.conf"
-        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/wg0.conf"
+        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "${WG_DIR}/${WG_INTERFACE}.conf"
+        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/${WG_INTERFACE}.conf"
 
         # Generate the command to append to the server configuration
-        plugin_addnote "On the server run: sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
+        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
     else
-        logtoboth "wg0.conf not found in /etc/wireguard, skipping client configuration update"
+        logtoboth "${WG_INTERFACE}.conf not found in /etc/wireguard, skipping client configuration update"
     fi
 
-
-# Change this to copy the file from the 0piboot directory
+    # Change this to copy the file from the 0piboot directory
     cat >/etc/sdm/0piboot/010-config-eeprom.sh <<EOF
 #!/bin/bash
 rpi-eeprom-config > /tmp/bootconf.txt
+echo "BOOT_UART=1" >> /tmp/bootconf.txt
+echo "POWER_OFF_ON_HALT=1" >> /tmp/bootconf.txt
 echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
-echo "BOOT_ORDER=0xf641" >> /tmp/bootconf.txt
+echo "BOOT_ORDER=0xf461" >> /tmp/bootconf.txt
 sudo rpi-eeprom-config --apply /tmp/bootconf.txt
 EOF
     chmod +x /etc/sdm/0piboot/010-config-eeprom.sh
@@ -146,12 +150,19 @@ elif [ "$phase" == "post-install" ]; then
     chown -R biosense:biosense /home/biosense/.ssh
     chmod -R go-rwx /home/biosense/.ssh
     
-    sudo systemctl enable wg-quick@wg0 && \
-    logtoboth "Enabled wg-quick@wg0 service"
+    sudo systemctl enable wg-quick@${WG_INTERFACE} && \
+    logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
 
-    # This is not needed and does not do anything anyway
-    sudo systemctl start wg-quick@wg0 && \
-    logtoboth "Started wg-quick@wg0 service"
+    # Edit sshd_config
+    echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
+    echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
+    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
+    logtoboth "Configured sshd to listen on all interfaces on port 2222 and WireGuard IP on port 22, and disabled password authentication"
+
+    # Download UPS codes
+    sudo -u biosense git clone https://github.com/suptronics/x120x.git /home/biosense/subtronics && \
+    logtoboth "Cloned subtronics repo"
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
