@@ -98,6 +98,8 @@ elif [ "$phase" == "1" ]; then
         logtoboth "wg0.conf not found in /etc/wireguard, skipping client configuration update"
     fi
 
+
+# Change this to copy the file from the 0piboot directory
     cat >/etc/sdm/0piboot/010-config-eeprom.sh <<EOF
 #!/bin/bash
 rpi-eeprom-config > /tmp/bootconf.txt
