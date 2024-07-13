@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Run as user biosense
+# Ensure the script is run as user biosense
 if [ "$(whoami)" != "biosense" ]; then
     echo "This script must be run as user biosense"
     exit 1
@@ -15,7 +15,7 @@ DEST_DIR="/home/biosense/sensor-data"
 # Path to the SSH private key
 SSH_KEY="/home/biosense/.ssh/id_rsa"
 
-# Log file path -- set to /dev/null to turn off
+# Log file path -- set to /dev/null to turn off logging
 LOG_FILE="/var/log/transfer-client-files.log"
 
 # Log the start of the script
@@ -37,10 +37,19 @@ fi
 for CLIENT_IP in $CLIENT_IPS; do
   # Extract the parts of the IP address
   IFS='.' read -r -a IP_PARTS <<< "$CLIENT_IP"
+  THIRD_OCTET="${IP_PARTS[2]}"
+
+  # Skip IPs in the 10.123.0.0/24 range
+  if [ "$THIRD_OCTET" -eq 0 ]; then
+    echo "Skipping non-sensor IP $CLIENT_IP" >> $LOG_FILE
+    continue
+  fi
+
+  # Extract the last two parts of the IP address
   X="${IP_PARTS[2]}"
   Y="${IP_PARTS[3]}"
 
-  # Derive the client hostname from the IP address
+  # Derive the client hostname from the last two parts of the IP address
   CLIENT_NAME="biosense-$X-$Y"
 
   # Define the source directory on the client
