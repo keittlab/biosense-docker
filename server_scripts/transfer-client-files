@@ -1,37 +1,106 @@
 #!/bin/bash
 
+# Default values for variables
+WG_INTERFACE="biosense"
+DEST_DIR="/home/biosense/sensor-data"
+SSH_KEY="/home/biosense/.ssh/id_rsa"
+LOG_DIR="/home/biosense/log"
+LOG_FILE="transfer-client-files.log"
+ENABLE_LOGGING=0
+
+# Function to display help message
+usage() {
+  echo "Usage: $0 [options]"
+  echo "Options:"
+  echo "  -i, --interface       WireGuard interface name (default: biosense)"
+  echo "  -d, --destination     Directory to store sensor data (default: /home/biosense/sensor-data)"
+  echo "  -k, --ssh-key         Path to the SSH private key (default: /home/biosense/.ssh/id_rsa)"
+  echo "  --log-dir             Directory to store logs (default: /home/biosense/log)"
+  echo "  -l, --log-file        Log file name (default: transfer-client-files.log)"
+  echo "  --enable-logging      Enable logging"
+  echo "  -h, --help            Display this help message"
+  exit 1
+}
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -i|--interface)
+      WG_INTERFACE="$2"
+      shift 2
+      ;;
+    -d|--destination)
+      DEST_DIR="$2"
+      shift 2
+      ;;
+    -k|--ssh-key)
+      SSH_KEY="$2"
+      shift 2
+      ;;
+    --log-dir)
+      LOG_DIR="$2"
+      shift 2
+      ;;
+    -l|--log-file)
+      LOG_FILE="$2"
+      shift 2
+      ;;
+    --enable-logging)
+      ENABLE_LOGGING=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+# Ensure LOG_FILE is relative to LOG_DIR
+LOG_FILE="$LOG_DIR/$LOG_FILE"
+
+# Function for logging
+log_message() {
+  if [ $ENABLE_LOGGING -eq 1 ]; then
+    echo "$1" >> $LOG_FILE
+  fi
+}
+
 # Ensure the script is run as user biosense
 if [ "$(whoami)" != "biosense" ]; then
-    echo "This script must be run as user biosense"
-    exit 1
+  echo "This script must be run as user biosense"
+  exit 1
 fi
-
-# WireGuard interface name
-WG_INTERFACE="biosense"
-
-# Directory to store sensor data
-DEST_DIR="/home/biosense/sensor-data"
-
-# Path to the SSH private key
-SSH_KEY="/home/biosense/.ssh/id_rsa"
-
-# Log file path -- set to /dev/null to turn off logging
-LOG_FILE="/var/log/transfer-client-files.log"
-
-# Log the start of the script
-{
-    echo "===================="
-    echo "Starting transfer-client-files script at $(date)"
-} >> $LOG_FILE
 
 # Get the list of allowed IPs from the WireGuard interface using sudo
 CLIENT_IPS=$(sudo wg show $WG_INTERFACE allowed-ips 2>&1 | awk '{print $2}' | sed 's|/32||')
 
 # Check if CLIENT_IPS is empty and exit if it is
 if [ -z "$CLIENT_IPS" ]; then
-    echo "No clients found or permission issue with 'wg show'. Exiting." >> $LOG_FILE
-    exit 1
+  echo "No clients found or permission issue with 'wg show'. Exiting."
+  exit 1
 fi
+
+# Create the log directory if it doesn't exist
+if [ ! -d "$LOG_DIR" ]; then
+  mkdir -p "$LOG_DIR"
+  chown biosense:biosense "$LOG_DIR"
+fi
+
+# Create the log file if it doesn't exist
+if [ $ENABLE_LOGGING -eq 1 ]; then
+  if [ ! -f "$LOG_FILE" ]; then
+    touch "$LOG_FILE"
+    chown biosense:biosense "$LOG_FILE"
+  fi
+fi
+
+# Log the start of the script
+log_message "===================="
+log_message "Starting transfer-client-files script at $(date)"
 
 # Iterate over each client IP
 for CLIENT_IP in $CLIENT_IPS; do
@@ -41,7 +110,7 @@ for CLIENT_IP in $CLIENT_IPS; do
 
   # Skip IPs in the 10.123.0.0/24 range
   if [ "$THIRD_OCTET" -eq 0 ]; then
-    echo "Skipping non-sensor IP $CLIENT_IP" >> $LOG_FILE
+    log_message "Skipping non-sensor IP $CLIENT_IP"
     continue
   fi
 
@@ -58,20 +127,27 @@ for CLIENT_IP in $CLIENT_IPS; do
   # Create the client's directory if it doesn't exist
   mkdir -p "$DEST_DIR/$CLIENT_NAME"
 
-  # Use rsync to transfer the files from the client to the server with checksum verification and compression
-  # Suppress known hosts warnings and log only errors
-  rsync -azqc -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --remove-source-files "$SRC_DIR" "$DEST_DIR/$CLIENT_NAME" 2>> $LOG_FILE
+  # Use rsync to transfer the files from the client to the server with checksum verification
+  # Suppress known hosts warnings and log only errors if logging is enabled
+  if [ $ENABLE_LOGGING -eq 1 ]; then
+    RSYNC_LOG_OPTION="--log-file=$LOG_FILE"
+  else
+    RSYNC_LOG_OPTION=""
+  fi
+
+  rsync -azqc $RSYNC_LOG_OPTION -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --remove-source-files "$SRC_DIR" "$DEST_DIR/$CLIENT_NAME"
 
   # Log the transfer
   if [ $? -eq 0 ]; then
-    echo "Transferred files from $CLIENT_NAME ($CLIENT_IP) to $DEST_DIR/$CLIENT_NAME on $(date)" >> $LOG_FILE
+    log_message "Transferred files from $CLIENT_NAME ($CLIENT_IP) to $DEST_DIR/$CLIENT_NAME on $(date)"
   else
-    echo "Failed to transfer files from $CLIENT_NAME ($CLIENT_IP) to $DEST_DIR/$CLIENT_NAME on $(date)" >> $LOG_FILE
+    log_message "Failed to transfer files from $CLIENT_NAME ($CLIENT_IP) to $DEST_DIR/$CLIENT_NAME on $(date)"
   fi
 done
 
 # Log the completion of the script
-{
-    echo "Completed transfer-client-files script at $(date)"
-    echo "===================="
-} >> $LOG_FILE
+log_message "Completed transfer-client-files script at $(date)"
+log_message "===================="
+
+# Example cron job:
+# 0 * * * * /home/biosense/scripts/transfer-client-files --interface biosense --destination /home/biosense/sensor-data --ssh-key /home/biosense/.ssh/id_rsa --log-dir /home/biosense/log --log-file transfer-client-files.log --enable-logging

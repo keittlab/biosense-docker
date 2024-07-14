@@ -1,57 +1,176 @@
 #!/bin/bash
 
-# Define the necessary variables
-WG_INTERFACE="wg0"
+# Default values for variables
+WG_INTERFACE="biosense"
 DEST_DIR="/home/biosense/sensor-data"
 SSH_KEY="/home/biosense/.ssh/id_rsa"
 SCRIPT_PATH="/home/biosense/scripts/transfer-client-files"
-LOG_FILE="/var/log/transfer-client-files.log"
-SUDOERS_FILE="/etc/sudoers.d/biosense_wg"
+LOG_DIR="/home/biosense/log"
+LOG_FILE="transfer-client-files.log"
+ENABLE_LOGGING=1
+TRANSFER_SCRIPT_URL="https://raw.githubusercontent.com/keittlab/biosense-docker/main/server_scripts/transfer-client-files"
+LOG_ROTATE_SCRIPT="/home/biosense/scripts/rotate-compress-logs"
+LOG_DELETE_SCRIPT="/home/biosense/scripts/delete-old-logs"
+TMP_SCRIPT_PATH="/tmp/transfer-client-files"
 
-# Ensure the script is run as root
-if [ "$(whoami)" != "root" ]; then
-    echo "This script must be run as root"
-    exit 1
+# Function to display help message
+usage() {
+  echo "Usage: $0 [options]"
+  echo "Options:"
+  echo "  -i, --interface       WireGuard interface name (default: $WG_INTERFACE)"
+  echo "  -d, --destination     Directory to store sensor data (default: $DEST_DIR)"
+  echo "  -k, --ssh-key         Path to the SSH private key (default: $SSH_KEY)"
+  echo "  -s, --script-path     Path to the transfer script (default: $SCRIPT_PATH)"
+  echo "  --log-dir             Directory to store logs (default: $LOG_DIR)"
+  echo "  -l, --log-file        Log file name (default: $LOG_FILE)"
+  echo "  --disable-logging     Disable logging"
+  echo "  -h, --help            Display this help message"
+  exit 1
+}
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -i|--interface)
+      WG_INTERFACE="$2"
+      shift 2
+      ;;
+    -d|--destination)
+      DEST_DIR="$2"
+      shift 2
+      ;;
+    -k|--ssh-key)
+      SSH_KEY="$2"
+      shift 2
+      ;;
+    -s|--script-path)
+      SCRIPT_PATH="$2"
+      shift 2
+      ;;
+    --log-dir)
+      LOG_DIR="$2"
+      shift 2
+      ;;
+    -l|--log-file)
+      LOG_FILE="$2"
+      shift 2
+      ;;
+    --disable-logging)
+      ENABLE_LOGGING=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+# Ensure LOG_FILE is relative to LOG_DIR
+LOG_FILE="$LOG_DIR/$LOG_FILE"
+
+# Function for logging
+log_message() {
+  if [ $ENABLE_LOGGING -eq 1 ]; then
+    echo "$1" >> $LOG_FILE
+  fi
+}
+
+# Function to download the transfer-client-files script
+download_transfer_script() {
+  echo "Downloading transfer-client-files script from GitHub..."
+  curl -fLo "$TMP_SCRIPT_PATH" "$TRANSFER_SCRIPT_URL"
+  if [ $? -ne 0 ]; then
+    echo "Failed to download transfer-client-files script. Please download it manually from $TRANSFER_SCRIPT_URL"
+    rm -f "$TMP_SCRIPT_PATH"
+  else
+    mv "$TMP_SCRIPT_PATH" "$SCRIPT_PATH"
+    chmod +x "$SCRIPT_PATH"
+    chown biosense:biosense "$SCRIPT_PATH"
+  fi
+}
+
+# Ensure the transfer-client-files script is present and executable, download if not
+if [ ! -f "$SCRIPT_PATH" ]; then
+  download_transfer_script
 fi
 
-# Create or update the sudoers file for biosense to run wg show without a password
-if [ -f "$SUDOERS_FILE" ]; then
-    echo "$SUDOERS_FILE exists, ensuring the correct entry is present."
-    if ! grep -q "wg show" "$SUDOERS_FILE"; then
-        echo "Adding entry to $SUDOERS_FILE."
-        echo "biosense ALL=(ALL) NOPASSWD: /usr/bin/wg show *" >> "$SUDOERS_FILE"
-    else
-        echo "Required entry already exists in $SUDOERS_FILE."
-    fi
-else
-    echo "Creating $SUDOERS_FILE."
-    echo "biosense ALL=(ALL) NOPASSWD: /usr/bin/wg show *" > "$SUDOERS_FILE"
-    chmod 440 "$SUDOERS_FILE"
+# Exit if the script file is still not present
+if [ ! -f "$SCRIPT_PATH" ]; then
+  echo "Error: transfer-client-files script is missing. Please download it from $TRANSFER_SCRIPT_URL"
+  exit 1
 fi
+
+# Function to ensure log directory exists
+ensure_log_directory() {
+  if [ ! -d "$LOG_DIR" ]; then
+    mkdir -p "$LOG_DIR"
+    chown biosense:biosense "$LOG_DIR"
+  fi
+}
+
+# Function to create log rotation script
+create_log_rotate_script() {
+  echo "#!/bin/bash
+if [ -f $LOG_FILE ]; then
+  mv $LOG_FILE ${LOG_FILE%.log}_\$(date +\%Y\%m\%d).log
+  gzip ${LOG_FILE%.log}_\$(date +\%Y\%m\%d).log
+fi" > "$LOG_ROTATE_SCRIPT"
+  chmod +x "$LOG_ROTATE_SCRIPT"
+  chown biosense:biosense "$LOG_ROTATE_SCRIPT"
+}
+
+# Function to create log deletion script
+create_log_delete_script() {
+  echo "#!/bin/bash
+find $LOG_DIR -name '*.gz' -mtime +30 -exec rm {} \;" > "$LOG_DELETE_SCRIPT"
+  chmod +x "$LOG_DELETE_SCRIPT"
+  chown biosense:biosense "$LOG_DELETE_SCRIPT"
+}
+
+# Ensure log directory exists
+ensure_log_directory
 
 # Create the destination directory if it doesn't exist
-mkdir -p $DEST_DIR
-chown biosense:biosense $DEST_DIR
+if [ ! -d "$DEST_DIR" ]; then
+  mkdir -p "$DEST_DIR"
+  chown biosense:biosense "$DEST_DIR"
+fi
 
 # Create the log file and set ownership to biosense
 if [ ! -f "$LOG_FILE" ]; then
-    touch $LOG_FILE
-    chown biosense:adm $LOG_FILE
-    chmod 640 $LOG_FILE
+  touch "$LOG_FILE"
+  chown biosense:biosense "$LOG_FILE"
 fi
 
-# Ensure the transfer-client-files script is executable and owned by biosense
-chmod +x $SCRIPT_PATH
-chown biosense:biosense $SCRIPT_PATH
-
-# Check if there is an existing crontab for biosense
-# TODO: Fix me -- this should check for the existing entry
-if crontab -u biosense -l &>/dev/null; then
-    echo "Appending to existing crontab for biosense."
-    (crontab -u biosense -l; echo "0 * * * * $SCRIPT_PATH") | crontab -u biosense -
-else
-    echo "Creating new crontab for biosense."
-    echo "0 * * * * $SCRIPT_PATH" | crontab -u biosense -
+# Construct crontab entry for the transfer-client-files script
+CRON_JOB="0 * * * * $SCRIPT_PATH --interface $WG_INTERFACE --destination $DEST_DIR --ssh-key $SSH_KEY --log-dir $LOG_DIR --log-file $(basename $LOG_FILE)"
+if [ $ENABLE_LOGGING -eq 1 ]; then
+  CRON_JOB+=" --enable-logging"
 fi
+
+# Update or create the crontab entry for the transfer-client-files script
+( crontab -u biosense -l 2>/dev/null | grep -v -F "$SCRIPT_PATH" ; echo "$CRON_JOB" ) | crontab -u biosense -
+
+# Create log rotation script
+create_log_rotate_script
+
+# Construct crontab entry for log rotation
+LOG_ROTATE_CRON_JOB="0 0 * * * $LOG_ROTATE_SCRIPT"
+
+# Update or create the crontab entry for log rotation
+( crontab -u biosense -l 2>/dev/null | grep -v -F "$LOG_ROTATE_SCRIPT" ; echo "$LOG_ROTATE_CRON_JOB" ) | crontab -u biosense -
+
+# Create log deletion script
+create_log_delete_script
+
+# Construct crontab entry for log deletion
+LOG_DELETE_CRON_JOB="0 1 * * * $LOG_DELETE_SCRIPT"
+
+# Update or create the crontab entry for log deletion
+( crontab -u biosense -l 2>/dev/null | grep -v -F "$LOG_DELETE_SCRIPT" ; echo "$LOG_DELETE_CRON_JOB" ) | crontab -u biosense -
 
 echo "Server-side configuration complete."
