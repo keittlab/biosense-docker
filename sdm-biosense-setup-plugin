@@ -172,6 +172,10 @@ elif [ "$phase" == "post-install" ]; then
     find /home/biosense/suptronics -type f -name '*.py' -exec sed -i 's/\bsmbus\b/smbus2/g' {} \; && \
     logtoboth "Replaced smbus with smbus2 in scripts"
 
+    # Set time zone to UTC for uniformity across clients
+    timedatectl set-timezone UTC && \
+    logtoboth "Set timezone to UTC"
+
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
 
