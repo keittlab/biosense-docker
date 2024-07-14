@@ -1,3 +1,5 @@
 apscheduler
 adafruit-circuitpython-bme280
 adafruit-circuitpython-seesaw
+smbus2
+

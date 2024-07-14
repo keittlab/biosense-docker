@@ -106,6 +106,7 @@ elif [ "$phase" == "1" ]; then
 #!/bin/bash
 rpi-eeprom-config > /tmp/bootconf.txt
 echo "BOOT_UART=0" >> /tmp/bootconf.txt
+echo "WAKE_ON_GPIO=1" >> /tmp/bootconf.txt
 echo "POWER_OFF_ON_HALT=0" >> /tmp/bootconf.txt
 echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
 echo "BOOT_ORDER=0xf461" >> /tmp/bootconf.txt
@@ -156,16 +157,20 @@ elif [ "$phase" == "post-install" ]; then
     sudo systemctl start wg-quick@${WG_INTERFACE} && \
     logtoboth "Started wg-quick@${WG_INTERFACE} service"
 
-    # Edit sshd_config
-    # echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
-    # echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
-    # echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
-    # echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
-    # logtoboth "Configured sshd to listen on all interfaces on port 2222 and WireGuard IP on port 22, and disabled password authentication"
+    Edit sshd_config
+    echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
+    echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
+    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
+    logtoboth "Configured sshd to listen on all interfaces on port 2222 and WireGuard IP on port 22, and disabled password authentication"
 
     # Download UPS codes
-    sudo -u biosense git clone https://github.com/suptronics/x120x.git /home/biosense/subtronics && \
+    sudo -u biosense git clone https://github.com/suptronics/x120x.git /home/biosense/suptronics && \
     logtoboth "Cloned subtronics repo"
+
+    # Modify scripts to replace smbus with smbus2
+    find /home/biosense/suptronics -type f -name '*.py' -exec sed -i 's/\bsmbus\b/smbus2/g' {} \; && \
+    logtoboth "Replaced smbus with smbus2 in scripts"
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
