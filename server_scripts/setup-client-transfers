@@ -187,4 +187,5 @@ LOG_DELETE_CRON_JOB="0 1 * * * $LOG_DELETE_SCRIPT"
 ( crontab -u biosense -l 2>/dev/null | grep -v -F "$LOG_DELETE_SCRIPT" ; echo "$LOG_DELETE_CRON_JOB" ) | crontab -u biosense -
 log_system_change "Updated crontab entry for log deletion script"
 
+echo "Changes logged to /root/biosense.log"
 echo "Server-side configuration complete."
