@@ -12,6 +12,7 @@ TRANSFER_SCRIPT_URL="https://raw.githubusercontent.com/keittlab/biosense-docker/
 LOG_ROTATE_SCRIPT="/home/biosense/scripts/rotate-compress-logs"
 LOG_DELETE_SCRIPT="/home/biosense/scripts/delete-old-logs"
 TMP_SCRIPT_PATH="/tmp/transfer-client-files"
+SYSTEM_CHANGE_LOG="/root/biosense.log"
 
 # Function to display help message
 usage() {
@@ -26,6 +27,11 @@ usage() {
   echo "  --disable-logging     Disable logging"
   echo "  -h, --help            Display this help message"
   exit 1
+}
+
+# Function to log system changes
+log_system_change() {
+  echo "$(date +'%Y-%m-%d %H:%M:%S') $1" >> $SYSTEM_CHANGE_LOG
 }
 
 # Parse command line options
@@ -109,6 +115,7 @@ ensure_log_directory() {
   if [ ! -d "$LOG_DIR" ]; then
     mkdir -p "$LOG_DIR"
     chown biosense:biosense "$LOG_DIR"
+    log_system_change "Created directory $LOG_DIR"
   fi
 }
 
@@ -121,6 +128,7 @@ if [ -f $LOG_FILE ]; then
 fi" > "$LOG_ROTATE_SCRIPT"
   chmod +x "$LOG_ROTATE_SCRIPT"
   chown biosense:biosense "$LOG_ROTATE_SCRIPT"
+  log_system_change "Created log rotation script $LOG_ROTATE_SCRIPT"
 }
 
 # Function to create log deletion script
@@ -129,6 +137,7 @@ create_log_delete_script() {
 find $LOG_DIR -name '*.gz' -mtime +30 -exec rm {} \;" > "$LOG_DELETE_SCRIPT"
   chmod +x "$LOG_DELETE_SCRIPT"
   chown biosense:biosense "$LOG_DELETE_SCRIPT"
+  log_system_change "Created log deletion script $LOG_DELETE_SCRIPT"
 }
 
 # Ensure log directory exists
@@ -138,12 +147,14 @@ ensure_log_directory
 if [ ! -d "$DEST_DIR" ]; then
   mkdir -p "$DEST_DIR"
   chown biosense:biosense "$DEST_DIR"
+  log_system_change "Created directory $DEST_DIR"
 fi
 
 # Create the log file and set ownership to biosense
 if [ ! -f "$LOG_FILE" ]; then
   touch "$LOG_FILE"
   chown biosense:biosense "$LOG_FILE"
+  log_system_change "Created log file $LOG_FILE"
 fi
 
 # Construct crontab entry for the transfer-client-files script
@@ -154,6 +165,7 @@ fi
 
 # Update or create the crontab entry for the transfer-client-files script
 ( crontab -u biosense -l 2>/dev/null | grep -v -F "$SCRIPT_PATH" ; echo "$CRON_JOB" ) | crontab -u biosense -
+log_system_change "Updated crontab entry for transfer-client-files script"
 
 # Create log rotation script
 create_log_rotate_script
@@ -163,6 +175,7 @@ LOG_ROTATE_CRON_JOB="0 0 * * * $LOG_ROTATE_SCRIPT"
 
 # Update or create the crontab entry for log rotation
 ( crontab -u biosense -l 2>/dev/null | grep -v -F "$LOG_ROTATE_SCRIPT" ; echo "$LOG_ROTATE_CRON_JOB" ) | crontab -u biosense -
+log_system_change "Updated crontab entry for log rotation script"
 
 # Create log deletion script
 create_log_delete_script
@@ -172,5 +185,6 @@ LOG_DELETE_CRON_JOB="0 1 * * * $LOG_DELETE_SCRIPT"
 
 # Update or create the crontab entry for log deletion
 ( crontab -u biosense -l 2>/dev/null | grep -v -F "$LOG_DELETE_SCRIPT" ; echo "$LOG_DELETE_CRON_JOB" ) | crontab -u biosense -
+log_system_change "Updated crontab entry for log deletion script"
 
 echo "Server-side configuration complete."
