@@ -16,8 +16,8 @@ function plugin_addnote() {
 phase=$1
 pfx="$(basename "$0")"
 args="$2"
-vldargs="|wg_ip|"
-reqargs="|wg_ip|"
+vldargs="|wg_ip|latitude|longitude|"
+reqargs="|wg_ip|latitude|longitude|"
 loadparams
 
 # Set the WireGuard interface name
@@ -27,7 +27,7 @@ WG_INTERFACE="biosense"
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
 
 # Log the values for debugging
-logtoboth "Plugin $pfx: wg_ip=${wg_ip}"
+logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}"
 
 if [ "$phase" == "0" ]; then
     #
@@ -93,6 +93,14 @@ elif [ "$phase" == "1" ]; then
     chmod +x /etc/profile.d/autologout.sh
     logtoboth "Automatic shell logout set to 10 minutes."
 
+    # Set geolocation environment variables
+    echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
+    echo "export LATITUDE" >>/etc/profile.d/geolocation.sh
+    echo "LONGITUDE=${longitude}" >>/etc/profile.d/geolocation.sh
+    echo "export LONGITUDE" >>/etc/profile.d/geolocation.sh
+    chmod +x /etc/profile.d/geolocation.sh
+    logtoboth "Set geolocation environment variables"
+
     WG_DIR="/etc/wireguard"
     if [ -f "$WG_DIR/${WG_INTERFACE}.conf" ]; then
         # Generate WireGuard keys
@@ -151,6 +159,14 @@ EOF
 EOF
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
+
+    # Install birdnet -- use a separate venv?
+    sudo -u biosense bash <<EOF
+    git clone https://github.com/kahst/BirdNET-Analyzer.git /home/biosense/BirdNET-Analyzer && \
+    /home/biosense/biosense_venv/bin/pip install -r /home/biosense/BirdNET-Analyzer/requirements.txt 
+EOF
+
+    logtoboth "Downloaded birdnet"
 
     # Create systemd service for shutdown-monitor
     cat <<EOF > /etc/systemd/system/shutdown-monitor.service

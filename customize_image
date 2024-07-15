@@ -17,10 +17,12 @@ INCREMENT_IP=0
 WIFI_COUNTRY="US"
 WIFI_SSID=""
 WIFI_PASSWORD=""
+LATITUDE=""
+LONGITUDE=""
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--config-file <file>] [--save-config <file>] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--use32bit] [--update-config] [--increment-ip] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>]"
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--config-file <file>] [--save-config <file>] [--overwrite] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--debug] [--aptcache <cache_address>] [--use32bit] [--update-config] [--increment-ip] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>] [--latitude <latitude>] [--longitude <longitude>]"
     echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image. If the IP doesn't include the '10.123' part, it will be added. (optional)"
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
     echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
@@ -39,6 +41,8 @@ usage() {
     echo "  --wifi-country <countryname> : Specify the name of the country to use for the WiFi Country setting."
     echo "  --wifi-ssid <ssid>        : Specifies the WiFi SSID to enable."
     echo "  --wifi-password <password>: Password for the wifi-ssid network."
+    echo "  --latitude <latitude>     : Specify the latitude for the custom plugin."
+    echo "  --longitude <longitude>   : Specify the longitude for the custom plugin."
     exit 1
 }
 
@@ -70,6 +74,8 @@ save_yaml() {
         echo "wifi_country: \"${WIFI_COUNTRY}\""
         echo "wifi_ssid: \"${WIFI_SSID}\""
         echo "wifi_password: \"${WIFI_PASSWORD}\""
+        echo "latitude: \"${LATITUDE}\""
+        echo "longitude: \"${LONGITUDE}\""
     } > "$yaml_file"
 }
 
@@ -164,6 +170,14 @@ while [[ "$#" -gt 0 ]]; do
             WIFI_PASSWORD=$2
             shift
             ;;
+        --latitude)
+            LATITUDE=$2
+            shift
+            ;;
+        --longitude)
+            LONGITUDE=$2
+            shift
+            ;;
         *)
             echo "Invalid option: $1" 1>&2
             usage
@@ -196,6 +210,8 @@ if [[ -n "$CONFIG_FILE" ]]; then
     CONFIG_APTCACHE=$(read_yaml "$CONFIG_FILE" "aptcache")
     CONFIG_WIFI_SSID=$(read_yaml "$CONFIG_FILE" "wifi_ssid")
     CONFIG_WIFI_PASSWORD=$(read_yaml "$CONFIG_FILE" "wifi_password")
+    CONFIG_LATITUDE=$(read_yaml "$CONFIG_FILE" "latitude")
+    CONFIG_LONGITUDE=$(read_yaml "$CONFIG_FILE" "longitude")
 
     # Apply config file values
     IMAGE_SOURCE_DIR="${IMAGE_SOURCE_DIR:-$CONFIG_IMAGE_SOURCE_DIR}"
@@ -209,6 +225,8 @@ if [[ -n "$CONFIG_FILE" ]]; then
     WIFI_SSID="${WIFI_SSID:-$CONFIG_WIFI_SSID}"
     WIFI_PASSWORD="${WIFI_PASSWORD:-$CONFIG_WIFI_PASSWORD}"
     WG_IP="${WG_IP:-$CONFIG_WG_IP}"
+    LATITUDE="${LATITUDE:-$CONFIG_LATITUDE}"
+    LONGITUDE="${LONGITUDE:-$CONFIG_LONGITUDE}"
 fi
 
 # Validate input parameters
@@ -288,7 +306,7 @@ if [[ ${DISABLE_TRIGGERHAPPY} -eq 1 ]]; then
 fi
 
 # Construct the sdm command
-SDM_COMMAND="sudo sdm --customize --extend --xmb 1024"
+SDM_COMMAND="sudo sdm --customize --extend --xmb 2048"
 if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
 fi
@@ -298,7 +316,7 @@ SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     --plugin disables:\"${DISABLES}\" \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
-    --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}\""
+    --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}\""
 
 # Add network plugin if WiFi details are specified
 NETWORK_PLUGIN_ARGS=""
