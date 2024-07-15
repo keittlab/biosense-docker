@@ -1,0 +1,102 @@
+#!/bin/bash
+
+# Load SDM parameters
+function loadparams() {
+    source "$SDMPT/etc/sdm/sdm-readparams"
+}
+
+# Function to add a note to the end of the customization process
+function plugin_addnote() {
+    local note="$1"
+    echo "$note" >>/etc/sdm/history
+    echo "$note"
+}
+
+# Get the phase (0, 1, or post-install) and arguments
+phase=$1
+pfx="$(basename "$0")"
+args="$2"
+vldargs="|wg_ip|latitude|longitude|"
+reqargs="|wg_ip|latitude|longitude|"
+loadparams
+
+# Set the WireGuard interface name
+WG_INTERFACE="biosense"
+
+# Extract arguments
+plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
+
+# Log the values for debugging
+logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}"
+
+if [ "$phase" == "1" ]; then
+    #
+    # Phase 1 (in nspawn)
+    #
+    logtoboth "* Plugin $pfx: Phase 1"
+
+    # Set geolocation environment variables
+    echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
+    echo "export LATITUDE" >>/etc/profile.d/geolocation.sh
+    echo "LONGITUDE=${longitude}" >>/etc/profile.d/geolocation.sh
+    echo "export LONGITUDE" >>/etc/profile.d/geolocation.sh
+    chmod +x /etc/profile.d/geolocation.sh
+    logtoboth "Set geolocation environment variables"
+
+    WG_DIR="/etc/wireguard"
+    if [ -f "$WG_DIR/${WG_INTERFACE}.conf" ]; then
+        # Generate WireGuard keys
+        mkdir -p "$WG_DIR"
+        cd "$WG_DIR" || exit
+        umask 077
+        wg genkey | tee privatekey | wg pubkey >publickey
+
+        PRIVATE_KEY=$(cat privatekey)
+        PUBLIC_KEY=$(cat publickey)
+
+        # Update the client configuration
+        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "${WG_DIR}/${WG_INTERFACE}.conf"
+        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/${WG_INTERFACE}.conf"
+
+        # Generate the command to append to the server configuration
+        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
+    else
+        logtoboth "${WG_INTERFACE}.conf not found in /etc/wireguard, skipping client configuration update"
+    fi
+
+    logtoboth "* Plugin $pfx: Phase 1 completed"
+
+elif [ "$phase" == "post-install" ]; then
+    #
+    # Post-install edits
+    #
+    logtoboth "* Plugin $pfx: Phase post-install"
+
+    # Edit sshd_config
+    echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
+    echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
+    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
+    logtoboth "Configured sshd_config"
+
+    sudo systemctl enable wg-quick@${WG_INTERFACE} && \
+    logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
+
+    sudo systemctl start wg-quick@${WG_INTERFACE} && \
+    logtoboth "Started wg-quick@${WG_INTERFACE} service"
+
+    systemctl enable shutdown-monitor.service && \
+    logtoboth "Enabled shutdown-monitor.service"
+
+    systemctl start shutdown-monitor.service && \
+    logtoboth "Started shutdown-monitor.service"
+
+    # Set time zone to UTC for uniformity across clients
+    timedatectl set-timezone UTC && \
+    logtoboth "Set timezone to UTC"
+
+    logtoboth "* Plugin $pfx: Phase post-install Completed"
+fi
+
+echo "done."
+exit 0

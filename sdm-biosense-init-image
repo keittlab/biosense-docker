@@ -1,8 +1,12 @@
 #!/bin/bash
+#
+# This is an sdm plugin for: sdm-biosense-init-image
+#
+# The plugin is called three times: for Phase 0, Phase 1, and post-install.
+#
 
-# Load SDM parameters
 function loadparams() {
-    source "$SDMPT/etc/sdm/sdm-readparams"
+    source $SDMPT/etc/sdm/sdm-readparams
 }
 
 # Function to add a note to the end of the customization process
@@ -12,29 +16,33 @@ function plugin_addnote() {
     echo "$note"
 }
 
-# Get the phase (0, 1, or post-install) and arguments
+# $1 is the phase: "0", "1", or "post-install"
+# $2 is the argument list: arg1=val1|arg2=val2|arg3=val3| ...
+#
+# Main code for the Plugin
+#
 phase=$1
-pfx="$(basename "$0")"
+pfx="$(basename $0)"     # For messages
 args="$2"
-vldargs="|wg_ip|latitude|longitude|"
-reqargs="|wg_ip|latitude|longitude|"
 loadparams
+vldargs=""
+rqdargs=""
+assetdir="$SDMPT/etc/sdm/assets/$pfx"
 
 # Set the WireGuard interface name
 WG_INTERFACE="biosense"
 
-# Extract arguments
-plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
-
-# Log the values for debugging
-logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}"
-
 if [ "$phase" == "0" ]; then
     #
-    # In Phase 0 all references to directories in the image
-    # must be preceded by $SDMPT
+    # In Phase 0 all references to directories in the image must be preceded by $SDMPT
     #
     logtoboth "* Plugin $pfx: Start Phase 0"
+    plugin_getargs $pfx "$args" "$vldargs" "$rqdargs" || exit
+    #
+    # Print the keys found (example usage). plugin_getargs returns the list of found keys in $foundkeys
+    #
+    plugin_printkeys
+    mkdir -p $assetdir
 
     # Check if there are SSH key files to copy
     if ls /home/agent/hostdir/biosense_ssh_keys/* 1>/dev/null 2>&1; then
@@ -85,42 +93,15 @@ elif [ "$phase" == "1" ]; then
     #
     # Phase 1 (in nspawn)
     #
-    logtoboth "* Plugin $pfx: Phase 1"
-
+    logtoboth "* Plugin $pfx: Start Phase 1"
+    plugin_getargs $pfx "$args" "$vldargs" "$rqdargs"
+    #logfreespace "at start of Plugin $pfx Phase 1"
+    
     # Set an autologout timer
     echo "TMOUT=600" >/etc/profile.d/autologout.sh
     echo "export TMOUT" >>/etc/profile.d/autologout.sh
     chmod +x /etc/profile.d/autologout.sh
     logtoboth "Automatic shell logout set to 10 minutes."
-
-    # Set geolocation environment variables
-    echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
-    echo "export LATITUDE" >>/etc/profile.d/geolocation.sh
-    echo "LONGITUDE=${longitude}" >>/etc/profile.d/geolocation.sh
-    echo "export LONGITUDE" >>/etc/profile.d/geolocation.sh
-    chmod +x /etc/profile.d/geolocation.sh
-    logtoboth "Set geolocation environment variables"
-
-    WG_DIR="/etc/wireguard"
-    if [ -f "$WG_DIR/${WG_INTERFACE}.conf" ]; then
-        # Generate WireGuard keys
-        mkdir -p "$WG_DIR"
-        cd "$WG_DIR" || exit
-        umask 077
-        wg genkey | tee privatekey | wg pubkey >publickey
-
-        PRIVATE_KEY=$(cat privatekey)
-        PUBLIC_KEY=$(cat publickey)
-
-        # Update the client configuration
-        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "${WG_DIR}/${WG_INTERFACE}.conf"
-        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/${WG_INTERFACE}.conf"
-
-        # Generate the command to append to the server configuration
-        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
-    else
-        logtoboth "${WG_INTERFACE}.conf not found in /etc/wireguard, skipping client configuration update"
-    fi
 
     # Change this to copy the file from the 0piboot directory
     cat >/etc/sdm/0piboot/010-config-eeprom.sh <<EOF
@@ -149,7 +130,7 @@ EOF
     logtoboth "Set keymap to Generic 104-key PC"
 
     # Create a virtual environment and install packages from requirements.txt
-    sudo -u biosense bash <<EOF
+    sudo -u biosense bash <<'EOF'
     python3 -m venv /home/biosense/biosense_venv
     source /home/biosense/biosense_venv/bin/activate
     if [ -f /home/biosense/requirements.txt ]; then
@@ -160,82 +141,20 @@ EOF
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
 
-# # Install BirdNET-Analyzer in a separate virtual environment
-# sudo -u biosense bash <<EOF
-# cd /home/biosense
-
-# # Download the BirdNET-Analyzer repository
-# curl -L -o BirdNET-Analyzer-main.zip https://github.com/kahst/BirdNET-Analyzer/archive/refs/heads/main.zip
-
-# # Check if the file was downloaded successfully
-# if [ -f "BirdNET-Analyzer-main.zip" ]; then
-#     # Change permissions to ensure the file can be read
-#     chmod 644 BirdNET-Analyzer-main.zip
-
-#     # Unzip the downloaded file
-#     unzip BirdNET-Analyzer-main.zip
-
-#     # Remove the zip file after extraction
-#     rm -f BirdNET-Analyzer-main.zip
-
-#     # Install the required Python packages
-#     /home/biosense/biosense_venv/bin/pip install -r /home/biosense/BirdNET-Analyzer-main/requirements.txt
-
-# else
-#     echo "Download failed or file not found."
-#     exit 1
-# fi
-# EOF
-
-    # Create systemd service for shutdown-monitor
-    cat <<EOF > /etc/systemd/system/shutdown-monitor.service
-[Unit]
-Description=Shutdown Monitor Service
-
-[Service]
-ExecStart=/usr/local/bin/shutdown-monitor
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    logtoboth "* Plugin $pfx: Phase 1 completed"
+    logtoboth "* Plugin $pfx: Complete Phase 1"
 
 elif [ "$phase" == "post-install" ]; then
     #
-    # Post-install edits
+    # Plugin Post-install edits
     #
-    logtoboth "* Plugin $pfx: Phase post-install"
+    logtoboth "* Plugin $pfx: Start Phase post-install"
+    plugin_getargs $pfx "$args" "$vldargs" "$rqdargs"
+    #logfreespace "at start of Plugin $pfx Phase post-install"
 
     chown -R biosense:biosense /home/biosense/.ssh
     chmod -R go-rwx /home/biosense/.ssh
     
-    sudo systemctl enable wg-quick@${WG_INTERFACE} && \
-    logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
-
-    sudo systemctl start wg-quick@${WG_INTERFACE} && \
-    logtoboth "Started wg-quick@${WG_INTERFACE} service"
-
-    systemctl enable shutdown-monitor.service && \
-    logtoboth "Enabled shutdown-monitor.service"
-
-    systemctl start shutdown-monitor.service && \
-    logtoboth "Started shutdown-monitor.service"
-
-    # Edit sshd_config
-    # echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
-    # echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
-    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
-    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
-    logtoboth "Configured sshd_config"
-
-    # Set time zone to UTC for uniformity across clients
-    timedatectl set-timezone UTC && \
-    logtoboth "Set timezone to UTC"
-
-    logtoboth "* Plugin $pfx: Phase post-install Completed"
+    logtoboth "* Plugin $pfx: Complete Phase post-install"
 fi
 
 echo "done."

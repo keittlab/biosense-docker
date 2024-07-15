@@ -1,0 +1,322 @@
+#!/bin/bash
+
+IMAGE_SOURCE_DIR="customized_images"
+IMAGE_DEST_DIR="customized_images"
+DEBUG=0
+WG_IP=""
+WIFI_COUNTRY="US"
+WIFI_SSID=""
+WIFI_PASSWORD=""
+LATITUDE=""
+LONGITUDE=""
+CONFIG_FILE=""
+SAVE_CONFIG_FILE=""
+OVERWRITE=0
+UPDATE_CONFIG=0
+DISABLE_WIFI=0
+DISABLE_BLUETOOTH=0
+DISABLE_TRIGGERHAPPY=0
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--overwrite] [--debug] [--config-file <file>] [--save-config <file>] [--update-config] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>] [--latitude <latitude>] [--longitude <longitude>]"
+    echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image."
+    echo "  --source-dir <dir>        : Specify the directory for the source images (default: customized_images)."
+    echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
+    echo "  --image-file <file>       : Path to the source image file. Can be a full path or just the filename."
+    echo "  --overwrite               : Overwrite the customized image file if it exists."
+    echo "  --debug                   : Run sdm without --batch option."
+    echo "  --config-file <file>      : Specify a YAML configuration file to read default values from."
+    echo "  --save-config <file>      : Write out all current settings to the named file in YAML format."
+    echo "  --update-config           : Update the specified configuration file with current settings."
+    echo "  --disable-wifi            : Disable WiFi in the customized image."
+    echo "  --disable-bluetooth       : Disable Bluetooth in the customized image."
+    echo "  --disable-triggerhappy    : Disable Triggerhappy in the customized image."
+    echo "  --wifi-country <countryname> : Specify the name of the country to use for the WiFi Country setting."
+    echo "  --wifi-ssid <ssid>        : Specifies the WiFi SSID to enable."
+    echo "  --wifi-password <password>: Password for the wifi-ssid network."
+    echo "  --latitude <latitude>     : Specify the latitude for the custom plugin."
+    echo "  --longitude <longitude>   : Specify the longitude for the custom plugin."
+    exit 1
+}
+
+# Function to trim whitespace from a variable
+trim() {
+    echo "$1" | awk '{$1=$1};1'
+}
+
+# Function to read YAML configuration using yq and trim the output
+read_yaml() {
+    local yaml_file=$1
+    local key=$2
+    local value=$(yq eval ".$key" "$yaml_file")
+    echo $(trim "$value")
+}
+
+# Function to save current settings to a YAML file
+save_yaml() {
+    local yaml_file=$1
+    {
+        echo "wg_ip: \"${WG_IP}\""
+        echo "source_dir: \"${IMAGE_SOURCE_DIR}\""
+        echo "dest_dir: \"${IMAGE_DEST_DIR}\""
+        echo "image_file: \"${IMAGE_FILE}\""
+        echo "disable_wifi: ${DISABLE_WIFI}"
+        echo "disable_bluetooth: ${DISABLE_BLUETOOTH}"
+        echo "disable_triggerhappy: ${DISABLE_TRIGGERHAPPY}"
+        echo "wifi_country: \"${WIFI_COUNTRY}\""
+        echo "wifi_ssid: \"${WIFI_SSID}\""
+        echo "wifi_password: \"${WIFI_PASSWORD}\""
+        echo "latitude: \"${LATITUDE}\""
+        echo "longitude: \"${LONGITUDE}\""
+    } > "$yaml_file"
+}
+
+# Function to find the latest image file in the source directory
+find_latest_image() {
+    local latest_image=$(ls -t ${IMAGE_SOURCE_DIR}/*.img 2>/dev/null | head -n 1)
+    if [[ -z "$latest_image" ]]; then
+        echo "No image files found in the source directory."
+        exit 1
+    fi
+    echo $(basename "$latest_image")
+}
+
+# Function to find the next available IP in the series
+next_ip() {
+    local ip=$1
+    local IFS='.'
+    read -r -a ip_parts <<< "$ip"
+    if [[ ${ip_parts[3]} -eq 255 ]]; then
+        ip_parts[3]=0
+        ip_parts[2]=$((ip_parts[2] + 1))
+    else
+        ip_parts[3]=$((ip_parts[3] + 1))
+    fi
+    echo "${ip_parts[0]}.${ip_parts[1]}.${ip_parts[2]}.${ip_parts[3]}"
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --wg-ip)
+            WG_IP=$2
+            shift
+            ;;
+        --source-dir)
+            IMAGE_SOURCE_DIR=$2
+            shift
+            ;;
+        --dest-dir)
+            IMAGE_DEST_DIR=$2
+            shift
+            ;;
+        --image-file)
+            IMAGE_FILE=$(basename "$2")
+            shift
+            ;;
+        --config-file)
+            CONFIG_FILE=$2
+            shift
+            ;;
+        --save-config)
+            SAVE_CONFIG_FILE=$2
+            shift
+            ;;
+        --update-config)
+            UPDATE_CONFIG=1
+            ;;
+        --overwrite)
+            OVERWRITE=1
+            ;;
+        --disable-wifi)
+            DISABLE_WIFI=1
+            ;;
+        --disable-bluetooth)
+            DISABLE_BLUETOOTH=1
+            ;;
+        --disable-triggerhappy)
+            DISABLE_TRIGGERHAPPY=1
+            ;;
+        --debug)
+            DEBUG=1
+            ;;
+        --wifi-country)
+            WIFI_COUNTRY=$2
+            shift
+            ;;
+        --wifi-ssid)
+            WIFI_SSID=$2
+            shift
+            ;;
+        --wifi-password)
+            WIFI_PASSWORD=$2
+            shift
+            ;;
+        --latitude)
+            LATITUDE=$2
+            shift
+            ;;
+        --longitude)
+            LONGITUDE=$2
+            shift
+            ;;
+        *)
+            echo "Invalid option: $1" 1>&2
+            usage
+            ;;
+    esac
+    shift
+done
+
+# If config file is specified, check for yq and the existence of the file only if needed
+if [[ -n "$CONFIG_FILE" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --config-file option."
+        exit 1
+    fi
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "Error: Specified config file does not exist."
+        exit 1
+    fi
+
+    # Read values from the config file
+    CONFIG_WG_IP=$(read_yaml "$CONFIG_FILE" "wg_ip")
+    CONFIG_WIFI_COUNTRY=$(read_yaml "$CONFIG_FILE" "wifi_country")
+    CONFIG_IMAGE_SOURCE_DIR=$(read_yaml "$CONFIG_FILE" "source_dir")
+    CONFIG_IMAGE_DEST_DIR=$(read_yaml "$CONFIG_FILE" "dest_dir")
+    CONFIG_IMAGE_FILE=$(read_yaml "$CONFIG_FILE" "image_file")
+    CONFIG_DISABLE_WIFI=$(read_yaml "$CONFIG_FILE" "disable_wifi")
+    CONFIG_DISABLE_BLUETOOTH=$(read_yaml "$CONFIG_FILE" "disable_bluetooth")
+    CONFIG_DISABLE_TRIGGERHAPPY=$(read_yaml "$CONFIG_FILE" "disable_triggerhappy")
+    CONFIG_WIFI_SSID=$(read_yaml "$CONFIG_FILE" "wifi_ssid")
+    CONFIG_WIFI_PASSWORD=$(read_yaml "$CONFIG_FILE" "wifi_password")
+    CONFIG_LATITUDE=$(read_yaml "$CONFIG_FILE" "latitude")
+    CONFIG_LONGITUDE=$(read_yaml "$CONFIG_FILE" "longitude")
+
+    # Apply config file values
+    IMAGE_SOURCE_DIR="${IMAGE_SOURCE_DIR:-$CONFIG_IMAGE_SOURCE_DIR}"
+    IMAGE_DEST_DIR="${IMAGE_DEST_DIR:-$CONFIG_IMAGE_DEST_DIR}"
+    IMAGE_FILE="${IMAGE_FILE:-$CONFIG_IMAGE_FILE}"
+    DISABLE_WIFI="${DISABLE_WIFI:-$CONFIG_DISABLE_WIFI}"
+    DISABLE_BLUETOOTH="${DISABLE_BLUETOOTH:-$CONFIG_DISABLE_BLUETOOTH}"
+    DISABLE_TRIGGERHAPPY="${DISABLE_TRIGGERHAPPY:-$CONFIG_DISABLE_TRIGGERHAPPY}"
+    WIFI_COUNTRY="${CONFIG_WIFI_COUNTRY:-$WIFI_COUNTRY}"
+    WIFI_SSID="${WIFI_SSID:-$CONFIG_WIFI_SSID}"
+    WIFI_PASSWORD="${WIFI_PASSWORD:-$CONFIG_WIFI_PASSWORD}"
+    WG_IP="${WG_IP:-$CONFIG_WG_IP}"
+    LATITUDE="${LATITUDE:-$CONFIG_LATITUDE}"
+    LONGITUDE="${LONGITUDE:-$CONFIG_LONGITUDE}"
+fi
+
+# Validate input parameters
+if [[ -z "${WG_IP}" ]]; then
+    echo "WireGuard IP is required."
+    usage
+fi
+
+if [[ -z "${IMAGE_FILE}" ]]; then
+    IMAGE_FILE=$(find_latest_image)
+    echo "No image file specified. Using the latest image file: ${IMAGE_FILE}"
+fi
+
+# Generate hostname from WireGuard IP
+IFS='.' read -r -a ip_parts <<< "${WG_IP}"
+HOSTNAME="biosense-${ip_parts[2]}-${ip_parts[3]}"
+
+# Check if the image file exists
+if [[ ! -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" ]]; then
+    echo "Image file does not exist."
+    exit 1
+fi
+
+echo ""
+echo "Using image file: ${IMAGE_SOURCE_DIR}/${IMAGE_FILE}"
+echo "Generated hostname: ${HOSTNAME}"
+echo ""
+
+IMAGE_FILE_BASE=$(basename "${IMAGE_FILE}")
+CUSTOMIZED_IMAGE_FILE="./${IMAGE_DEST_DIR}/${HOSTNAME}-${IMAGE_FILE_BASE}"
+CUSTOMIZED_IMAGE_FILE_BASE=$(basename "${CUSTOMIZED_IMAGE_FILE}")
+
+echo "Writing to ${CUSTOMIZED_IMAGE_FILE_BASE}"
+echo ""
+
+CONTAINER_IMAGE_FILE="./hostdir/${IMAGE_SOURCE_DIR}/${IMAGE_FILE_BASE}"
+CONTAINER_CUSTOMIZED_IMAGE_FILE="./hostdir/${IMAGE_DEST_DIR}/${CUSTOMIZED_IMAGE_FILE_BASE}"
+
+# Check if the customized image file exists
+if [[ -f "${CUSTOMIZED_IMAGE_FILE}" ]]; then
+    if [[ ${OVERWRITE} -eq 1 ]]; then
+        echo "Overwriting existing file: ${CUSTOMIZED_IMAGE_FILE}"
+        cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+    else
+        echo "Customized image file already exists and overwrite option not set. Exiting."
+        exit 1
+    fi
+else
+    cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+fi
+
+DOCKER_IMAGE_NAME="biosense-sdm"
+docker build -t "${DOCKER_IMAGE_NAME}" .
+
+SDM_COMMAND="sudo sdm --customize --extend --xmb 2048"
+if [[ ${DEBUG} -eq 0 ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --batch"
+fi
+
+# Construct the disables plugin string
+DISABLES="piwiz"
+if [[ ${DISABLE_WIFI} -eq 1 ]]; then
+    DISABLES="wifi|${DISABLES}"
+fi
+if [[ ${DISABLE_BLUETOOTH} -eq 1 ]]; then
+    DISABLES="bluetooth|${DISABLES}"
+fi
+if [[ ${DISABLE_TRIGGERHAPPY} -eq 1 ]]; then
+    DISABLES="triggerhappy|${DISABLES}"
+fi
+
+SDM_COMMAND="${SDM_COMMAND} \
+    --chroot \
+    --plugin disables:\"${DISABLES}\" \
+    --plugin /home/agent/hostdir/sdm-biosense-finalize-image:\"wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}\" \
+    /home/agent/hostdir/${CUSTOMIZED_IMAGE_FILE}"
+
+# Add network plugin if WiFi details are specified
+NETWORK_PLUGIN_ARGS=""
+[ -n "${WIFI_SSID}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wifissid=${WIFI_SSID}|"
+[ -n "${WIFI_PASSWORD}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wifipassword=${WIFI_PASSWORD}|"
+[ -n "${WIFI_COUNTRY}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wificountry=${WIFI_COUNTRY}|"
+if [[ -n "${NETWORK_PLUGIN_ARGS}" ]]; then
+    NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS%|}"  # Remove trailing '|'
+    SDM_COMMAND="${SDM_COMMAND} --plugin network:\"${NETWORK_PLUGIN_ARGS}|noipv6\""
+fi
+
+docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"
+
+# Save the current configuration to a file if requested
+if [[ -n "${SAVE_CONFIG_FILE}" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --save-config option."
+        exit 1
+    fi
+
+    save_yaml "${SAVE_CONFIG_FILE}"
+    echo "Current configuration saved to ${SAVE_CONFIG_FILE}"
+fi
+
+# Update the specified configuration file if requested
+if [[ ${UPDATE_CONFIG} -eq 1 && -n "${CONFIG_FILE}" ]]; then
+    if ! command -v yq &> /dev/null; then
+        echo "Error: yq is not installed. Please install yq to use the --update-config option."
+        exit 1
+    fi
+
+    save_yaml "${CONFIG_FILE}"
+    echo "Configuration file ${CONFIG_FILE} updated with current settings"
+fi
+
+exit 0
