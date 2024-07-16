@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import sqlite3
+import psycopg2
+import argparse
+from time import sleep, strftime
+import board
+from adafruit_bme280 import basic as adafruit_bme280
+
+# Activate the virtual environment
+venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
+if os.path.exists(venv_path):
+    with open(venv_path) as file_:
+        exec(file_.read(), {'__file__': venv_path})
+
+# Initialize SQLite database
+def init_sqlite_db(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS bme280_readings (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      timestamp TEXT NOT NULL,
+                      temperature REAL,
+                      humidity REAL,
+                      pressure REAL)''')
+    conn.commit()
+    return conn
+
+# Initialize PostgreSQL database
+def init_postgresql_db(conn_str):
+    try:
+        conn = psycopg2.connect(conn_str)
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS bme280_readings (
+                          id SERIAL PRIMARY KEY,
+                          timestamp TIMESTAMPTZ NOT NULL,
+                          temperature DOUBLE PRECISION,
+                          humidity DOUBLE PRECISION,
+                          pressure DOUBLE PRECISION)''')
+        conn.commit()
+        return conn
+    except psycopg2.OperationalError as e:
+        print(f"Could not connect to PostgreSQL database: {e}")
+        return None
+
+def record_bme280_readings_sqlite(conn, data):
+    cursor = conn.cursor()
+    timestamp = strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('INSERT INTO bme280_readings (timestamp, temperature, humidity, pressure) VALUES (?, ?, ?, ?)',
+                   (timestamp, data['temp'], data['hum'], data['pres']))
+    conn.commit()
+
+def record_bme280_readings_postgresql(conn, data):
+    cursor = conn.cursor()
+    timestamp = strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('INSERT INTO bme280_readings (timestamp, temperature, humidity, pressure) VALUES (%s, %s, %s, %s)',
+                   (timestamp, data['temp'], data['hum'], data['pres']))
+    conn.commit()
+
+def initialize_sensor():
+    i2c = board.I2C()
+    try:
+        bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c)
+        bme280.sea_level_pressure = 1013.25  # Standard atmospheric pressure at sea level in hPa
+        return bme280
+    except Exception as e:
+        print(f"{strftime('%Y-%m-%d %H:%M:%S')}: BME280 i2c address could not be found. {e}")
+        return None
+
+def get_sensor_data(bme280):
+    data = {
+        'temp': 'n/a',
+        'hum': 'n/a',
+        'pres': 'n/a',
+    }
+    
+    if bme280:
+        try:
+            data['temp'] = bme280.temperature
+        except Exception as e:
+            print(f"{strftime('%Y-%m-%d %H:%M:%S')}: Could not collect temperature data from the BME280. {e}")
+        
+        try:
+            data['hum'] = bme280.relative_humidity
+        except Exception as e:
+            print(f"{strftime('%Y-%m-%d %H:%M:%S')}: Could not collect humidity data from the BME280. {e}")
+        
+        try:
+            data['pres'] = bme280.pressure
+        except Exception as e:
+            print(f"{strftime('%Y-%m-%d %H:%M:%S')}: Could not collect pressure data from the BME280. {e}")
+    
+    return data
+
+def load_config(config_file):
+    config = {}
+    try:
+        with open(config_file) as f:
+            for line in f:
+                if line.strip() and not line.startswith("#"):
+                    key, value = line.strip().split("=", 1)
+                    config[key] = value
+    except FileNotFoundError:
+        print(f"Configuration file '{config_file}' not found. Using command-line arguments or defaults.")
+    return config
+
+def main():
+    parser = argparse.ArgumentParser(description='Record BME280 sensor data.')
+    parser.add_argument('--config', type=str, default='sensor_config.conf', help='Path to configuration file')
+    parser.add_argument('--interval', type=int, help='Time interval between readings in seconds')
+    parser.add_argument('--db_type', type=str, choices=['sqlite', 'postgresql'], help='Database type to use')
+    parser.add_argument('--db_path', type=str, help='Path to SQLite database file')
+    parser.add_argument('--db_conn', type=str, help='PostgreSQL connection string')
+    parser.add_argument('--test_mode', action='store_true', help='Run in test mode')
+    parser.add_argument('--help', action='help', default=argparse.SUPPRESS, help='Show this help message and exit')
+
+    args = parser.parse_args()
+
+    # Load configuration from file
+    config = load_config(args.config)
+
+    # Override configuration with command-line arguments if provided
+    interval = args.interval if args.interval is not None else int(config.get('interval', 300))
+    db_type = args.db_type if args.db_type is not None else config.get('db_type', 'sqlite')
+    db_path = args.db_path if args.db_path is not None else config.get('db_path', '/home/biosense/sensor_data.db')
+    db_conn = args.db_conn if args.db_conn is not None else config.get('db_conn', '')
+    test_mode = args.test_mode or config.get('test_mode', 'False').lower() == 'true'
+
+    if test_mode:
+        print("Running in test mode")
+        db_path = '/home/biosense/test_sensor_data.db'
+        db_conn = db_conn + '_test' if db_conn else ''
+    
+    if db_type == 'sqlite':
+        conn = init_sqlite_db(db_path)
+    elif db_type == 'postgresql':
+        conn = init_postgresql_db(db_conn)
+        if conn is None:
+            print("Falling back to SQLite")
+            conn = init_sqlite_db(db_path)
+            db_type = 'sqlite'
+
+    bme280 = initialize_sensor()
+
+    print(f"Recording BME280 readings to {db_type} database every {interval} seconds")
+
+    while True:
+        data = get_sensor_data(bme280)
+        if db_type == 'sqlite':
+            record_bme280_readings_sqlite(conn, data)
+        elif db_type == 'postgresql':
+            try:
+                record_bme280_readings_postgresql(conn, data)
+            except psycopg2.OperationalError as e:
+                print(f"Error recording to PostgreSQL: {e}. Falling back to SQLite.")
+                conn = init_sqlite_db(db_path)
+                db_type = 'sqlite'
+                record_bme280_readings_sqlite(conn, data)
+        print(f"Date: {strftime('%Y-%m-%d')}, Time: {strftime('%H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}")
+        sleep(interval)  # Sleep for the specified interval
+
+if __name__ == "__main__":
+    main()

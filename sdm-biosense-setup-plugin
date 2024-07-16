@@ -66,6 +66,14 @@ if [ "$phase" == "0" ]; then
         logtoboth "requirements.txt file not found, skipping copy step"
     fi
 
+    # Copy the birdnetlib file if it exists
+    if [ -f /home/agent/hostdir/python/birdnetlib*.whl ]; then
+        cp /home/agent/hostdir/python/birdnetlib*.whl "$SDMPT/home/biosense"
+        logtoboth "Copied birdnetlib*.whl file to /home/biosense/birdnetlib*.whl"
+    else
+        logtoboth "birdnetlib*.whl file not found, skipping copy step"
+    fi
+
     # Copy scripts to /usr/local/bin
     if ls /home/agent/hostdir/scripts/* 1>/dev/null 2>&1; then
         mkdir -p "$SDMPT/usr/local/bin"
@@ -152,6 +160,19 @@ EOF
     sudo -u biosense bash <<EOF
     python3 -m venv /home/biosense/biosense_venv
     source /home/biosense/biosense_venv/bin/activate
+    if [ -f /home/biosense/birdnetlib*.whl ]; then
+        /home/biosense/biosense_venv/bin/pip install /home/biosense/birdnetlib*.whl
+        rm -f /home/biosense/birdnetlib*.whl
+    else
+        cd
+        curl -O https://files.pythonhosted.org/packages/ef/d7/13252c3c60ad1eafa2c78521e39be48d608c92c1e42d810f2ee91fc02b53/birdnetlib-0.17.2-py3-none-any.whl
+        if [ -f birdnetlib-0.17.2-py3-none-any.whl ]; then
+            /home/biosense/biosense_venv/bin/pip install birdnetlib-0.17.2-py3-none-any.whl
+            rm -f birdnetlib-0.17.2-py3-none-any.whl
+        else
+            /home/biosense/biosense_venv/bin/pip install birdnetlib
+        fi
+    fi
     if [ -f /home/biosense/requirements.txt ]; then
         /home/biosense/biosense_venv/bin/pip install -r /home/biosense/requirements.txt && \
         rm -f /home/biosense/requirements.txt
@@ -159,33 +180,6 @@ EOF
 EOF
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
-
-# # Install BirdNET-Analyzer in a separate virtual environment
-# sudo -u biosense bash <<EOF
-# cd /home/biosense
-
-# # Download the BirdNET-Analyzer repository
-# curl -L -o BirdNET-Analyzer-main.zip https://github.com/kahst/BirdNET-Analyzer/archive/refs/heads/main.zip
-
-# # Check if the file was downloaded successfully
-# if [ -f "BirdNET-Analyzer-main.zip" ]; then
-#     # Change permissions to ensure the file can be read
-#     chmod 644 BirdNET-Analyzer-main.zip
-
-#     # Unzip the downloaded file
-#     unzip BirdNET-Analyzer-main.zip
-
-#     # Remove the zip file after extraction
-#     rm -f BirdNET-Analyzer-main.zip
-
-#     # Install the required Python packages
-#     /home/biosense/biosense_venv/bin/pip install -r /home/biosense/BirdNET-Analyzer-main/requirements.txt
-
-# else
-#     echo "Download failed or file not found."
-#     exit 1
-# fi
-# EOF
 
     # Create systemd service for shutdown-monitor
     cat <<EOF > /etc/systemd/system/shutdown-monitor.service
@@ -225,8 +219,6 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "Started shutdown-monitor.service"
 
     # Edit sshd_config
-    # echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
-    # echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
     echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
     logtoboth "Configured sshd_config"
