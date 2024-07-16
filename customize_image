@@ -76,7 +76,7 @@ save_yaml() {
         echo "wifi_password: \"${WIFI_PASSWORD}\""
         echo "latitude: \"${LATITUDE}\""
         echo "longitude: \"${LONGITUDE}\""
-    } > "$yaml_file"
+    } >"$yaml_file"
 }
 
 # Function to find the latest image file in the source directory
@@ -93,7 +93,7 @@ find_latest_image() {
 next_ip() {
     local ip=$1
     local IFS='.'
-    read -r -a ip_parts <<< "$ip"
+    read -r -a ip_parts <<<"$ip"
     if [[ ${ip_parts[3]} -eq 255 ]]; then
         ip_parts[3]=0
         ip_parts[2]=$((ip_parts[2] + 1))
@@ -106,89 +106,89 @@ next_ip() {
 # Parse command line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --wg-ip)
-            WG_IP=$2
-            shift
-            ;;
-        --source-dir)
-            IMAGE_SOURCE_DIR=$2
-            shift
-            ;;
-        --dest-dir)
-            IMAGE_DEST_DIR=$2
-            shift
-            ;;
-        --image-file)
-            IMAGE_FILE=$(basename "$2")
-            shift
-            ;;
-        --config-file)
-            CONFIG_FILE=$2
-            shift
-            ;;
-        --save-config)
-            SAVE_CONFIG_FILE=$2
-            shift
-            ;;
-        --update-config)
-            UPDATE_CONFIG=1
-            ;;
-        --overwrite)
-            OVERWRITE=1
-            ;;
-        --disable-wifi)
-            DISABLE_WIFI=1
-            ;;
-        --disable-bluetooth)
-            DISABLE_BLUETOOTH=1
-            ;;
-        --disable-triggerhappy)
-            DISABLE_TRIGGERHAPPY=1
-            ;;
-        --debug)
-            DEBUG=1
-            ;;
-        --aptcache)
-            APTCACHE=$2
-            shift
-            ;;
-        --use32bit)
-            USE_32_BIT=1
-            ;;
-        --increment-ip)
-            INCREMENT_IP=1
-            ;;
-        --wifi-country)
-            WIFI_COUNTRY=$2
-            shift
-            ;;
-        --wifi-ssid)
-            WIFI_SSID=$2
-            shift
-            ;;
-        --wifi-password)
-            WIFI_PASSWORD=$2
-            shift
-            ;;
-        --latitude)
-            LATITUDE=$2
-            shift
-            ;;
-        --longitude)
-            LONGITUDE=$2
-            shift
-            ;;
-        *)
-            echo "Invalid option: $1" 1>&2
-            usage
-            ;;
+    --wg-ip)
+        WG_IP=$2
+        shift
+        ;;
+    --source-dir)
+        IMAGE_SOURCE_DIR=$2
+        shift
+        ;;
+    --dest-dir)
+        IMAGE_DEST_DIR=$2
+        shift
+        ;;
+    --image-file)
+        IMAGE_FILE=$(basename "$2")
+        shift
+        ;;
+    --config-file)
+        CONFIG_FILE=$2
+        shift
+        ;;
+    --save-config)
+        SAVE_CONFIG_FILE=$2
+        shift
+        ;;
+    --update-config)
+        UPDATE_CONFIG=1
+        ;;
+    --overwrite)
+        OVERWRITE=1
+        ;;
+    --disable-wifi)
+        DISABLE_WIFI=1
+        ;;
+    --disable-bluetooth)
+        DISABLE_BLUETOOTH=1
+        ;;
+    --disable-triggerhappy)
+        DISABLE_TRIGGERHAPPY=1
+        ;;
+    --debug)
+        DEBUG=1
+        ;;
+    --aptcache)
+        APTCACHE=$2
+        shift
+        ;;
+    --use32bit)
+        USE_32_BIT=1
+        ;;
+    --increment-ip)
+        INCREMENT_IP=1
+        ;;
+    --wifi-country)
+        WIFI_COUNTRY=$2
+        shift
+        ;;
+    --wifi-ssid)
+        WIFI_SSID=$2
+        shift
+        ;;
+    --wifi-password)
+        WIFI_PASSWORD=$2
+        shift
+        ;;
+    --latitude)
+        LATITUDE=$2
+        shift
+        ;;
+    --longitude)
+        LONGITUDE=$2
+        shift
+        ;;
+    *)
+        echo "Invalid option: $1" 1>&2
+        usage
+        ;;
     esac
     shift
 done
 
 # If config file is specified, check for yq and the existence of the file only if needed
 if [[ -n "$CONFIG_FILE" ]]; then
-    if ! command -v yq &> /dev/null; then
+    if ! command -v yq &>/dev/null; then
         echo "Error: yq is not installed. Please install yq to use the --config-file option."
         exit 1
     fi
@@ -252,7 +252,7 @@ if [[ "${WG_IP}" != 10.123.* ]]; then
 fi
 
 # Generate hostname from WireGuard IP
-IFS='.' read -r -a ip_parts <<< "${WG_IP}"
+IFS='.' read -r -a ip_parts <<<"${WG_IP}"
 HOSTNAME="biosense-${ip_parts[2]}-${ip_parts[3]}"
 
 # Check if the image file exists
@@ -314,6 +314,7 @@ fi
 # Add the necessary plugins to the sdm command
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
+    --loadlocal wifi \
     --plugin disables:\"${DISABLES}\" \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
     --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}\""
@@ -324,7 +325,7 @@ NETWORK_PLUGIN_ARGS=""
 [ -n "${WIFI_PASSWORD}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wifipassword=${WIFI_PASSWORD}|"
 [ -n "${WIFI_COUNTRY}" ] && NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS}wificountry=${WIFI_COUNTRY}|"
 if [[ -n "${NETWORK_PLUGIN_ARGS}" ]]; then
-    NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS%|}"  # Remove trailing '|'
+    NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS%|}" # Remove trailing '|'
     SDM_COMMAND="${SDM_COMMAND} --plugin network:\"${NETWORK_PLUGIN_ARGS}|noipv6\""
 fi
 
@@ -343,7 +344,7 @@ docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "$
 
 # Save the current configuration to a file if requested
 if [[ -n "${SAVE_CONFIG_FILE}" ]]; then
-    if ! command -v yq &> /dev/null; then
+    if ! command -v yq &>/dev/null; then
         echo "Error: yq is not installed. Please install yq to use the --save-config option."
         exit 1
     fi
@@ -354,7 +355,7 @@ fi
 
 # Update the specified configuration file if requested
 if [[ ${UPDATE_CONFIG} -eq 1 && -n "${CONFIG_FILE}" ]]; then
-    if ! command -v yq &> /dev/null; then
+    if ! command -v yq &>/dev/null; then
         echo "Error: yq is not installed. Please install yq to use the --update-config option."
         exit 1
     fi

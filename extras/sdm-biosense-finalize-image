@@ -73,27 +73,25 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "* Plugin $pfx: Phase post-install"
 
     # Edit sshd_config
-    echo 'ListenAddress 0.0.0.0:2222' >> /etc/ssh/sshd_config && \
-    echo "ListenAddress ${wg_ip}:22" >> /etc/ssh/sshd_config && \
-    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
-    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
-    logtoboth "Configured sshd_config"
+    echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
+        echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
+        logtoboth "Configured sshd_config"
 
-    sudo systemctl enable wg-quick@${WG_INTERFACE} && \
-    logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
+    sudo systemctl enable wg-quick@${WG_INTERFACE} &&
+        logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
 
-    sudo systemctl start wg-quick@${WG_INTERFACE} && \
-    logtoboth "Started wg-quick@${WG_INTERFACE} service"
+    sudo systemctl start wg-quick@${WG_INTERFACE} &&
+        logtoboth "Started wg-quick@${WG_INTERFACE} service"
 
-    systemctl enable shutdown-monitor.service && \
-    logtoboth "Enabled shutdown-monitor.service"
+    systemctl enable shutdown-monitor.service &&
+        logtoboth "Enabled shutdown-monitor.service"
 
-    systemctl start shutdown-monitor.service && \
-    logtoboth "Started shutdown-monitor.service"
+    systemctl start shutdown-monitor.service &&
+        logtoboth "Started shutdown-monitor.service"
 
     # Set time zone to UTC for uniformity across clients
-    timedatectl set-timezone UTC && \
-    logtoboth "Set timezone to UTC"
+    timedatectl set-timezone UTC &&
+        logtoboth "Set timezone to UTC"
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
