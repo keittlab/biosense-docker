@@ -22,7 +22,7 @@ function plugin_addnote() {
 # Main code for the Plugin
 #
 phase=$1
-pfx="$(basename $0)"     # For messages
+pfx="$(basename $0)" # For messages
 args="$2"
 loadparams
 vldargs=""
@@ -76,7 +76,6 @@ if [ "$phase" == "0" ]; then
 
     # Copy scripts to /usr/local/bin
     if ls /home/agent/hostdir/scripts/* 1>/dev/null 2>&1; then
-        mkdir -p "$SDMPT/usr/local/bin"
         for script_file in /home/agent/hostdir/scripts/*; do
             cp "$script_file" "$SDMPT/usr/local/bin"
             chmod +x "$SDMPT/usr/local/bin/$(basename "$script_file")"
@@ -85,6 +84,16 @@ if [ "$phase" == "0" ]; then
         logtoboth "Copied scripts to /usr/local/bin"
     else
         logtoboth "No scripts found, skipping copy step"
+    fi
+
+    # Copy the python wheel files if they exist
+    if ls /home/agent/hostdir/python/*.whl 1>/dev/null 2>&1; then
+        for wheel_file in /home/agent/hostdir/python/*.whl; do
+            cp "$wheel_file" "$SDMPT/home/biosense/"
+        done
+        logtoboth "Copied python wheel files to /home/biosense/"
+    else
+        logtoboth "No python wheel files found, skipping copy step"
     fi
 
     logtoboth "* Plugin $pfx: Complete Phase 0"
@@ -96,7 +105,7 @@ elif [ "$phase" == "1" ]; then
     logtoboth "* Plugin $pfx: Start Phase 1"
     plugin_getargs $pfx "$args" "$vldargs" "$rqdargs"
     #logfreespace "at start of Plugin $pfx Phase 1"
-    
+
     # Set an autologout timer
     echo "TMOUT=600" >/etc/profile.d/autologout.sh
     echo "export TMOUT" >>/etc/profile.d/autologout.sh
@@ -123,16 +132,35 @@ EOF
 
     logtoboth "Created dataqueue and datastore directories"
 
-    raspi-config nonint do_change_locale C.UTF-8 && \
-    logtoboth "Set locale to C.UTF-8"
+    raspi-config nonint do_change_locale C.UTF-8 &&
+        logtoboth "Set locale to C.UTF-8"
 
-    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' && \
-    logtoboth "Set keymap to Generic 104-key PC"
+    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' &&
+        logtoboth "Set keymap to Generic 104-key PC"
 
     # Create a virtual environment and install packages from requirements.txt
-    sudo -u biosense bash <<'EOF'
+    sudo -u biosense bash <<EOF
+    cd
     python3 -m venv /home/biosense/biosense_venv
     source /home/biosense/biosense_venv/bin/activate
+    if [ -f /home/biosense/birdnetlib*.whl ]; then
+        /home/biosense/biosense_venv/bin/pip install /home/biosense/birdnetlib*.whl
+        rm -f /home/biosense/birdnetlib*.whl
+    else
+        curl -O https://files.pythonhosted.org/packages/ef/d7/13252c3c60ad1eafa2c78521e39be48d608c92c1e42d810f2ee91fc02b53/birdnetlib-0.17.2-py3-none-any.whl
+        if [ -f birdnetlib-0.17.2-py3-none-any.whl ]; then
+            /home/biosense/biosense_venv/bin/pip install birdnetlib-0.17.2-py3-none-any.whl
+            rm -f birdnetlib-0.17.2-py3-none-any.whl
+        else
+            /home/biosense/biosense_venv/bin/pip install birdnetlib
+        fi
+    fi
+    if ls *.whl 1>/dev/null 2>&1; then
+        for wheel_file in *.whl; do
+            /home/biosense/biosense_venv/bin/pip install \$wheel_file && \
+            rm -f \$wheel_file
+        done
+    fi
     if [ -f /home/biosense/requirements.txt ]; then
         /home/biosense/biosense_venv/bin/pip install -r /home/biosense/requirements.txt && \
         rm -f /home/biosense/requirements.txt
@@ -153,7 +181,7 @@ elif [ "$phase" == "post-install" ]; then
 
     chown -R biosense:biosense /home/biosense/.ssh
     chmod -R go-rwx /home/biosense/.ssh
-    
+
     logtoboth "* Plugin $pfx: Complete Phase post-install"
 fi
 

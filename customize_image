@@ -314,7 +314,6 @@ fi
 # Add the necessary plugins to the sdm command
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
-    --loadlocal wifi \
     --plugin disables:\"${DISABLES}\" \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
     --plugin sdm-biosense-setup-plugin:\"wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}\""

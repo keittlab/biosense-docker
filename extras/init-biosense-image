@@ -19,28 +19,28 @@ usage() {
 # Parse command line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --source-dir)
-            IMAGE_SOURCE_DIR=$2
-            shift
-            ;;
-        --dest-dir)
-            IMAGE_DEST_DIR=$2
-            shift
-            ;;
-        --image-file)
-            IMAGE_FILE=$(basename "$2")
-            shift
-            ;;
-        --overwrite)
-            OVERWRITE=1
-            ;;
-        --debug)
-            DEBUG=1
-            ;;
-        *)
-            echo "Invalid option: $1" 1>&2
-            usage
-            ;;
+    --source-dir)
+        IMAGE_SOURCE_DIR=$2
+        shift
+        ;;
+    --dest-dir)
+        IMAGE_DEST_DIR=$2
+        shift
+        ;;
+    --image-file)
+        IMAGE_FILE=$(basename "$2")
+        shift
+        ;;
+    --overwrite)
+        OVERWRITE=1
+        ;;
+    --debug)
+        DEBUG=1
+        ;;
+    *)
+        echo "Invalid option: $1" 1>&2
+        usage
+        ;;
     esac
     shift
 done
@@ -80,7 +80,7 @@ fi
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     --plugin @/home/agent/hostdir/sdm-plugin-commands \
-    --plugin /home/agent/hostdir/sdm-biosense-init-image \
+    --plugin /home/agent/hostdir/init-biosense-image-plugin \
     /home/agent/hostdir/${CUSTOMIZED_IMAGE_FILE}"
 
 docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"

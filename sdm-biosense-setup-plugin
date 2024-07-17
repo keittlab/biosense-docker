@@ -150,11 +150,11 @@ EOF
 
     logtoboth "Created dataqueue and datastore directories"
 
-    raspi-config nonint do_change_locale C.UTF-8 && \
-    logtoboth "Set locale to C.UTF-8"
+    raspi-config nonint do_change_locale C.UTF-8 &&
+        logtoboth "Set locale to C.UTF-8"
 
-    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' && \
-    logtoboth "Set keymap to Generic 104-key PC"
+    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' &&
+        logtoboth "Set keymap to Generic 104-key PC"
 
     # Create a virtual environment and install packages from requirements.txt
     sudo -u biosense bash <<EOF
@@ -182,7 +182,7 @@ EOF
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
 
     # Create systemd service for shutdown-monitor
-    cat <<EOF > /etc/systemd/system/shutdown-monitor.service
+    cat <<EOF >/etc/systemd/system/shutdown-monitor.service
 [Unit]
 Description=Shutdown Monitor Service
 
@@ -205,27 +205,27 @@ elif [ "$phase" == "post-install" ]; then
 
     chown -R biosense:biosense /home/biosense/.ssh
     chmod -R go-rwx /home/biosense/.ssh
-    
-    sudo systemctl enable wg-quick@${WG_INTERFACE} && \
-    logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
 
-    sudo systemctl start wg-quick@${WG_INTERFACE} && \
-    logtoboth "Started wg-quick@${WG_INTERFACE} service"
+    sudo systemctl enable wg-quick@${WG_INTERFACE} &&
+        logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
 
-    systemctl enable shutdown-monitor.service && \
-    logtoboth "Enabled shutdown-monitor.service"
+    sudo systemctl start wg-quick@${WG_INTERFACE} &&
+        logtoboth "Started wg-quick@${WG_INTERFACE} service"
 
-    systemctl start shutdown-monitor.service && \
-    logtoboth "Started shutdown-monitor.service"
+    systemctl enable shutdown-monitor.service &&
+        logtoboth "Enabled shutdown-monitor.service"
+
+    systemctl start shutdown-monitor.service &&
+        logtoboth "Started shutdown-monitor.service"
 
     # Edit sshd_config
-    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
-    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
-    logtoboth "Configured sshd_config"
+    echo 'PasswordAuthentication Yes' >>/etc/ssh/sshd_config &&
+        echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
+        logtoboth "Configured sshd_config"
 
     # Set time zone to UTC for uniformity across clients
-    timedatectl set-timezone UTC && \
-    logtoboth "Set timezone to UTC"
+    timedatectl set-timezone UTC &&
+        logtoboth "Set timezone to UTC"
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
