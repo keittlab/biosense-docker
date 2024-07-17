@@ -16,7 +16,7 @@ function plugin_addnote() {
 phase=$1
 pfx="$(basename "$0")"
 args="$2"
-vldargs="|wg_ip|latitude|longitude|"
+vldargs="|wg_ip|latitude|longitude|edit_sshd_config|"
 reqargs="|wg_ip|latitude|longitude|"
 loadparams
 
@@ -26,10 +26,33 @@ WG_INTERFACE="biosense"
 # Extract arguments
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
 
-# Log the values for debugging
-logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}"
+if [ "$phase" == "0" ]; then
+    #
+    # In Phase 0 all references to directories in the image must be preceded by $SDMPT
+    #
+    logtoboth "* Plugin $pfx: Start Phase 0"
+    plugin_getargs "$pfx" "$args" "$vldargs" "$rqdargs" || exit
+    #
+    # Print the keys found (example usage). plugin_getargs returns the list of found keys in $foundkeys
+    #
+    plugin_printkeys
+    mkdir -p $assetdir
 
-if [ "$phase" == "1" ]; then
+    # Log the values for debugging
+    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, edit_sshd_config=${edit_sshd_config}"
+
+    # Copy the WireGuard configuration template if it exists
+    if [ -f /home/agent/hostdir/wireguard/template.conf ]; then
+        mkdir -p "$SDMPT/etc/wireguard"
+        cp /home/agent/hostdir/wireguard/template.conf "$SDMPT/etc/wireguard/${WG_INTERFACE}.conf"
+        chown -R root:root "$SDMPT/etc/wireguard"
+        chmod -R go-rwx "$SDMPT/etc/wireguard"
+        logtoboth "Copied template.conf to /etc/wireguard/${WG_INTERFACE}.conf"
+    else
+        logtoboth "template.conf not found, skipping copy step"
+    fi
+
+elif [ "$phase" == "1" ]; then
     #
     # Phase 1 (in nspawn)
     #
@@ -59,7 +82,7 @@ if [ "$phase" == "1" ]; then
         sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/${WG_INTERFACE}.conf"
 
         # Generate the command to append to the server configuration
-        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} allowed-ips ${wg_ip}/32"
+        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} persistent-keepalive 900 allowed-ips ${wg_ip}/32 "
     else
         logtoboth "${WG_INTERFACE}.conf not found in /etc/wireguard, skipping client configuration update"
     fi
@@ -72,10 +95,12 @@ elif [ "$phase" == "post-install" ]; then
     #
     logtoboth "* Plugin $pfx: Phase post-install"
 
-    # Edit sshd_config
-    #echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
-    #    echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
-    #    logtoboth "Configured sshd_config"
+    if [ "$edit_sshd_config" == "true" ]; then
+        # Edit sshd_config
+        echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
+            echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
+            logtoboth "Configured sshd_config"
+    fi
 
     sudo systemctl enable wg-quick@${WG_INTERFACE} &&
         logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
@@ -88,6 +113,12 @@ elif [ "$phase" == "post-install" ]; then
 
     systemctl start shutdown-monitor.service &&
         logtoboth "Started shutdown-monitor.service"
+
+    sudo systemctl enable bme280_sensor.service &&
+        logtoboth "Enabled bme280_sensor.service"
+
+    sudo systemctl start bme280_sensor.service &&
+        logtoboth "Started bme280_sensor.service"
 
     # Set time zone to UTC for uniformity across clients
     timedatectl set-timezone UTC &&

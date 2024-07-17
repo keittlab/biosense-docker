@@ -9,28 +9,55 @@ function loadparams() {
     source $SDMPT/etc/sdm/sdm-readparams
 }
 
-# Function to add a note to the end of the customization process
-function plugin_addnote() {
-    local note="$1"
-    echo "$note" >>/etc/sdm/history
-    echo "$note"
-}
-
 # $1 is the phase: "0", "1", or "post-install"
 # $2 is the argument list: arg1=val1|arg2=val2|arg3=val3| ...
 #
 # Main code for the Plugin
 #
 phase=$1
-pfx="$(basename $0)" # For messages
+pfx="$(basename $0)" #For messages
 args="$2"
 loadparams
-vldargs=""
-rqdargs=""
+vldargs="" # |list|of|valid|args|or|nullstring|
+rqdargs="" # |list|of|required|args|or|nullstring|
 assetdir="$SDMPT/etc/sdm/assets/$pfx"
 
 # Set the WireGuard interface name
 WG_INTERFACE="biosense"
+
+# Helper function to copy file trees
+copy_and_set_ownership() {
+    local src_dir=$1
+    local dest_dir=$2
+    local owner=$3
+    local group=$4
+
+    if [ -d "$src_dir" ]; then
+        find "$src_dir" | while read -r src_item; do
+            # Get the relative path of the item from the source directory
+            rel_path="${src_item#$src_dir}"
+            dest_item="$dest_dir$rel_path"
+
+            # Check if the item exists in the destination
+            if [ ! -e "$dest_item" ]; then
+                if [ -d "$src_item" ]; then
+                    # Create the directory in the destination
+                    mkdir -p "$dest_item"
+                    chown "$owner:$group" "$dest_item"
+                elif [ -f "$src_item" ]; then
+                    # Copy the file to the destination
+                    cp "$src_item" "$dest_item"
+                    chown "$owner:$group" "$dest_item"
+                fi
+                echo "Copied and set ownership for $dest_item"
+            else
+                echo "Skipped existing item $dest_item"
+            fi
+        done
+    else
+        logtoboth "No files found in $src_dir"
+    fi
+}
 
 if [ "$phase" == "0" ]; then
     #
@@ -55,35 +82,12 @@ if [ "$phase" == "0" ]; then
         logtoboth "No SSH keys found, skipping copy step"
     fi
 
-    # Copy the WireGuard configuration template if it exists
-    if [ -f /home/agent/hostdir/wireguard/template.conf ]; then
-        mkdir -p "$SDMPT/etc/wireguard"
-        cp /home/agent/hostdir/wireguard/template.conf "$SDMPT/etc/wireguard/${WG_INTERFACE}.conf"
-        chown -R root:root "$SDMPT/etc/wireguard"
-        chmod -R go-rwx "$SDMPT/etc/wireguard"
-        logtoboth "Copied template.conf to /etc/wireguard/${WG_INTERFACE}.conf"
-    else
-        logtoboth "template.conf not found, skipping copy step"
-    fi
-
     # Copy the requirements.txt file if it exists
     if [ -f /home/agent/hostdir/python/requirements.txt ]; then
         cp /home/agent/hostdir/python/requirements.txt "$SDMPT/home/biosense"
         logtoboth "Copied requirements.txt file to /home/biosense/requirements.txt"
     else
         logtoboth "requirements.txt file not found, skipping copy step"
-    fi
-
-    # Copy scripts to /usr/local/bin
-    if ls /home/agent/hostdir/scripts/* 1>/dev/null 2>&1; then
-        for script_file in /home/agent/hostdir/scripts/*; do
-            cp "$script_file" "$SDMPT/usr/local/bin"
-            chmod +x "$SDMPT/usr/local/bin/$(basename "$script_file")"
-            chown root:root "$SDMPT/usr/local/bin/$(basename "$script_file")"
-        done
-        logtoboth "Copied scripts to /usr/local/bin"
-    else
-        logtoboth "No scripts found, skipping copy step"
     fi
 
     # Copy the python wheel files if they exist
@@ -95,6 +99,14 @@ if [ "$phase" == "0" ]; then
     else
         logtoboth "No python wheel files found, skipping copy step"
     fi
+
+    # Copy etc files
+    copy_and_set_ownership /home/agent/hostdir/etc $SDMPT/etc root root
+
+    # Copy usr/local files
+    copy_and_set_ownership /home/agent/hostdir/usr/local $SDMPT/usr/local root root
+
+    logtoboth "Copied files to image"
 
     logtoboth "* Plugin $pfx: Complete Phase 0"
 

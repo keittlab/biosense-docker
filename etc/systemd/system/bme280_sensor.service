@@ -1,0 +1,18 @@
+[Unit]
+Description=BME280 Sensor Data Recorder
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/env python3 /usr/local/read-bme280 --config /etc/biosense/bme280_sensor.conf
+WorkingDirectory=/home/biosense
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=biosense
+
+[Install]
+WantedBy=multi-user.target
+
+
+# Move to /etc/systemd/system/bme280_sensor.service
+

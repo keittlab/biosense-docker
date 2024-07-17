@@ -8,6 +8,7 @@ import argparse
 from time import sleep, strftime
 import board
 from adafruit_bme280 import basic as adafruit_bme280
+from urllib.parse import urlparse
 
 # Activate the virtual environment
 venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
@@ -106,13 +107,20 @@ def load_config(config_file):
         print(f"Configuration file '{config_file}' not found. Using command-line arguments or defaults.")
     return config
 
+def parse_db_conn(db_conn_str):
+    db_url = urlparse(db_conn_str)
+    if db_url.scheme == 'sqlite':
+        return 'sqlite', db_url.path
+    elif db_url.scheme == 'postgresql':
+        return 'postgresql', db_conn_str
+    else:
+        raise ValueError("Unsupported database type")
+
 def main():
     parser = argparse.ArgumentParser(description='Record BME280 sensor data.')
-    parser.add_argument('--config', type=str, default='sensor_config.conf', help='Path to configuration file')
+    parser.add_argument('--config', type=str, default='/etc/biosense/sensor_config.conf', help='Path to configuration file')
     parser.add_argument('--interval', type=int, help='Time interval between readings in seconds')
-    parser.add_argument('--db_type', type=str, choices=['sqlite', 'postgresql'], help='Database type to use')
-    parser.add_argument('--db_path', type=str, help='Path to SQLite database file')
-    parser.add_argument('--db_conn', type=str, help='PostgreSQL connection string')
+    parser.add_argument('--db_conn', type=str, help='Database connection string')
     parser.add_argument('--test_mode', action='store_true', help='Run in test mode')
     parser.add_argument('--help', action='help', default=argparse.SUPPRESS, help='Show this help message and exit')
 
@@ -123,23 +131,23 @@ def main():
 
     # Override configuration with command-line arguments if provided
     interval = args.interval if args.interval is not None else int(config.get('interval', 300))
-    db_type = args.db_type if args.db_type is not None else config.get('db_type', 'sqlite')
-    db_path = args.db_path if args.db_path is not None else config.get('db_path', '/home/biosense/sensor_data.db')
-    db_conn = args.db_conn if args.db_conn is not None else config.get('db_conn', '')
+    db_conn = args.db_conn if args.db_conn is not None else config.get('db_conn', 'sqlite:///home/biosense/datastore/sensor_data.db')
     test_mode = args.test_mode or config.get('test_mode', 'False').lower() == 'true'
 
     if test_mode:
         print("Running in test mode")
-        db_path = '/home/biosense/test_sensor_data.db'
-        db_conn = db_conn + '_test' if db_conn else ''
-    
+        db_conn = 'sqlite:///home/biosense/datastore/test_sensor_data.db'
+
+    db_type, db_conn_value = parse_db_conn(db_conn)
+
     if db_type == 'sqlite':
-        conn = init_sqlite_db(db_path)
+        conn = init_sqlite_db(db_conn_value)
     elif db_type == 'postgresql':
-        conn = init_postgresql_db(db_conn)
+        conn = init_postgresql_db(db_conn_value)
         if conn is None:
             print("Falling back to SQLite")
-            conn = init_sqlite_db(db_path)
+            db_conn_value = '/home/biosense/datastore/sensor_data.db'
+            conn = init_sqlite_db(db_conn_value)
             db_type = 'sqlite'
 
     bme280 = initialize_sensor()
@@ -155,7 +163,8 @@ def main():
                 record_bme280_readings_postgresql(conn, data)
             except psycopg2.OperationalError as e:
                 print(f"Error recording to PostgreSQL: {e}. Falling back to SQLite.")
-                conn = init_sqlite_db(db_path)
+                db_conn_value = '/home/biosense/datastore/sensor_data.db'
+                conn = init_sqlite_db(db_conn_value)
                 db_type = 'sqlite'
                 record_bme280_readings_sqlite(conn, data)
         print(f"Date: {strftime('%Y-%m-%d')}, Time: {strftime('%H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}")

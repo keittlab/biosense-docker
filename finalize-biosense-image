@@ -16,10 +16,11 @@ UPDATE_CONFIG=0
 DISABLE_WIFI=0
 DISABLE_BLUETOOTH=0
 DISABLE_TRIGGERHAPPY=0
+DISABLE_SSH_PASSWORDS=0
 
 # Function to display usage information
 usage() {
-    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--overwrite] [--debug] [--config-file <file>] [--save-config <file>] [--update-config] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>] [--latitude <latitude>] [--longitude <longitude>]"
+    echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--overwrite] [--debug] [--config-file <file>] [--save-config <file>] [--update-config] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>] [--latitude <latitude>] [--longitude <longitude>] [--disable-ssh-passwords]"
     echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image."
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: customized_images)."
     echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
@@ -37,6 +38,7 @@ usage() {
     echo "  --wifi-password <password>: Password for the wifi-ssid network."
     echo "  --latitude <latitude>     : Specify the latitude for the custom plugin."
     echo "  --longitude <longitude>   : Specify the longitude for the custom plugin."
+    echo "  --disable-ssh-passwords   : Disable SSH password authentication in the customized image."
     exit 1
 }
 
@@ -69,6 +71,7 @@ save_yaml() {
         echo "wifi_password: \"${WIFI_PASSWORD}\""
         echo "latitude: \"${LATITUDE}\""
         echo "longitude: \"${LONGITUDE}\""
+        echo "disable_ssh_passwords: ${DISABLE_SSH_PASSWORDS}"
     } >"$yaml_file"
 }
 
@@ -138,6 +141,9 @@ while [[ "$#" -gt 0 ]]; do
     --disable-triggerhappy)
         DISABLE_TRIGGERHAPPY=1
         ;;
+    --disable-ssh-passwords)
+        DISABLE_SSH_PASSWORDS=1
+        ;;
     --debug)
         DEBUG=1
         ;;
@@ -194,6 +200,7 @@ if [[ -n "$CONFIG_FILE" ]]; then
     CONFIG_WIFI_PASSWORD=$(read_yaml "$CONFIG_FILE" "wifi_password")
     CONFIG_LATITUDE=$(read_yaml "$CONFIG_FILE" "latitude")
     CONFIG_LONGITUDE=$(read_yaml "$CONFIG_FILE" "longitude")
+    CONFIG_DISABLE_SSH_PASSWORDS=$(read_yaml "$CONFIG_FILE" "disable_ssh_passwords")
 
     # Apply config file values
     IMAGE_SOURCE_DIR="${IMAGE_SOURCE_DIR:-$CONFIG_IMAGE_SOURCE_DIR}"
@@ -208,6 +215,7 @@ if [[ -n "$CONFIG_FILE" ]]; then
     WG_IP="${WG_IP:-$CONFIG_WG_IP}"
     LATITUDE="${LATITUDE:-$CONFIG_LATITUDE}"
     LONGITUDE="${LONGITUDE:-$CONFIG_LONGITUDE}"
+    DISABLE_SSH_PASSWORDS="${DISABLE_SSH_PASSWORDS:-$CONFIG_DISABLE_SSH_PASSWORDS}"
 fi
 
 # Validate input parameters
@@ -260,6 +268,11 @@ CONTAINER_CUSTOMIZED_IMAGE_FILE="./hostdir/${IMAGE_DEST_DIR}/${CUSTOMIZED_IMAGE_
 if [[ -f "${CUSTOMIZED_IMAGE_FILE}" && ${OVERWRITE} -eq 0 ]]; then
     echo "Output image file already exists and overwrite option not set. Exiting."
     exit 1
+else
+    if [[ ${OVERWRITE} -eq 1 ]]; then
+        echo "Overwriting ${CUSTOMIZED_IMAGE_FILE}"
+        rm -f "${CUSTOMIZED_IMAGE_FILE}"
+    fi
 fi
 
 DOCKER_IMAGE_NAME="biosense-sdm"
@@ -282,10 +295,15 @@ if [[ ${DISABLE_TRIGGERHAPPY} -eq 1 ]]; then
     DISABLES="triggerhappy|${DISABLES}"
 fi
 
+PLUGIN_ARGS="wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}"
+if [[ ${DISABLE_SSH_PASSWORDS} -eq 1 ]]; then
+    PLUGIN_ARGS="${PLUGIN_ARGS}|edit_sshd_config=true"
+fi
+
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     --plugin disables:\"${DISABLES}\" \
-    --plugin /home/agent/hostdir/finalize-biosense-image-plugin:\"wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}\""
+    --plugin /home/agent/hostdir/finalize-biosense-image-plugin:\"${PLUGIN_ARGS}\""
 
 # Add network plugin if WiFi details are specified
 NETWORK_PLUGIN_ARGS=""
