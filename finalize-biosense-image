@@ -221,9 +221,19 @@ if [[ -z "${IMAGE_FILE}" ]]; then
     echo "No image file specified. Using the latest image file: ${IMAGE_FILE}"
 fi
 
+# Add '10.123.' prefix if not included in WG_IP
+if [[ "${WG_IP}" != 10.123.* ]]; then
+    WG_IP="10.123.${WG_IP}"
+fi
+
 # Generate hostname from WireGuard IP
 IFS='.' read -r -a ip_parts <<<"${WG_IP}"
-HOSTNAME="biosense-${ip_parts[2]}-${ip_parts[3]}"
+if [[ ${#ip_parts[@]} -eq 4 ]]; then
+    HOSTNAME="biosense-${ip_parts[2]}-${ip_parts[3]}"
+else
+    echo "Invalid WireGuard IP format."
+    exit 1
+fi
 
 # Check if the image file exists
 if [[ ! -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" ]]; then
@@ -247,22 +257,15 @@ CONTAINER_IMAGE_FILE="./hostdir/${IMAGE_SOURCE_DIR}/${IMAGE_FILE_BASE}"
 CONTAINER_CUSTOMIZED_IMAGE_FILE="./hostdir/${IMAGE_DEST_DIR}/${CUSTOMIZED_IMAGE_FILE_BASE}"
 
 # Check if the customized image file exists
-if [[ -f "${CUSTOMIZED_IMAGE_FILE}" ]]; then
-    if [[ ${OVERWRITE} -eq 1 ]]; then
-        echo "Overwriting existing file: ${CUSTOMIZED_IMAGE_FILE}"
-        cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
-    else
-        echo "Customized image file already exists and overwrite option not set. Exiting."
-        exit 1
-    fi
-else
-    cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+if [[ -f "${CUSTOMIZED_IMAGE_FILE}" && ${OVERWRITE} -eq 0 ]]; then
+    echo "Output image file already exists and overwrite option not set. Exiting."
+    exit 1
 fi
 
 DOCKER_IMAGE_NAME="biosense-sdm"
 docker build -t "${DOCKER_IMAGE_NAME}" .
 
-SDM_COMMAND="sudo sdm --burn --burnfile /home/agent/hostdir/${CUSTOMIZED_IMAGE_FILE}"
+SDM_COMMAND="sudo sdm --burnfile $CONTAINER_CUSTOMIZED_IMAGE_FILE"
 if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
 fi
@@ -293,6 +296,9 @@ if [[ -n "${NETWORK_PLUGIN_ARGS}" ]]; then
     NETWORK_PLUGIN_ARGS="${NETWORK_PLUGIN_ARGS%|}" # Remove trailing '|'
     SDM_COMMAND="${SDM_COMMAND} --plugin network:\"${NETWORK_PLUGIN_ARGS}|noipv6\""
 fi
+
+# Correct typo here
+SDM_COMMAND="${SDM_COMMAND} ${CONTAINER_IMAGE_FILE}"
 
 docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"
 

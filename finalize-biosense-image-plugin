@@ -73,9 +73,9 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "* Plugin $pfx: Phase post-install"
 
     # Edit sshd_config
-    echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
-        echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
-        logtoboth "Configured sshd_config"
+    #echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
+    #    echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
+    #    logtoboth "Configured sshd_config"
 
     sudo systemctl enable wg-quick@${WG_INTERFACE} &&
         logtoboth "Enabled wg-quick@${WG_INTERFACE} service"

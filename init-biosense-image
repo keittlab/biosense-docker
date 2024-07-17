@@ -21,28 +21,29 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
     --source-dir)
         IMAGE_SOURCE_DIR=$2
-        shift
+        shift 2
         ;;
     --dest-dir)
         IMAGE_DEST_DIR=$2
-        shift
+        shift 2
         ;;
     --image-file)
         IMAGE_FILE=$(basename "$2")
-        shift
+        shift 2
         ;;
     --overwrite)
         OVERWRITE=1
+        shift
         ;;
     --debug)
         DEBUG=1
+        shift
         ;;
     *)
         echo "Invalid option: $1" 1>&2
         usage
         ;;
     esac
-    shift
 done
 
 if [[ -z "${IMAGE_FILE}" ]]; then
@@ -51,7 +52,9 @@ if [[ -z "${IMAGE_FILE}" ]]; then
         echo "No image files found in the source directory."
         exit 1
     fi
-    IMAGE_FILE=$(basename "$IMAGE_FILE")
+    IMAGE_FILE="$(basename $IMAGE_FILE)"
+else
+    IMAGE_FILE="$(basename $IMAGE_FILE)"
 fi
 
 CUSTOMIZED_IMAGE_FILE="${IMAGE_DEST_DIR}/${IMAGE_FILE}"
