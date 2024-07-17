@@ -1,0 +1,14 @@
+[Unit]
+Description=UPS Monitoring Service
+RequiresMountsFor=/home/biosense/datastore
+After=local-fs.target
+
+[Service]
+WorkingDirectory=/home/biosense/biosense_venv
+ExecStart=/home/biosense/biosense_venv/bin/python3 /usr/local/bin/ups-monitor
+Restart=on-failure
+RestartSec=30
+User=biosense
+
+[Install]
+WantedBy=multi-user.target

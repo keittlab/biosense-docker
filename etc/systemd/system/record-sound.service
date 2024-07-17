@@ -4,9 +4,11 @@ RequiresMountsFor=/home/biosense/datastore/sounds_recordings
 After=local-fs.target
 
 [Service]
-ExecStart=/usr/bin/python3 /usr/local/bin/record-sound.py
+WorkingDirectory=/home/biosense/biosense_venv
+ExecStart=/home/biosense/biosense_venv/bin/python3 /usr/local/bin/record-sound
 Restart=on-failure
 RestartSec=30
+User=biosense
 
 [Install]
 WantedBy=multi-user.target

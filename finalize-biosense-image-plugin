@@ -108,23 +108,35 @@ elif [ "$phase" == "post-install" ]; then
     sudo systemctl start wg-quick@${WG_INTERFACE} &&
         logtoboth "Started wg-quick@${WG_INTERFACE} service"
 
-    systemctl enable shutdown-monitor.service &&
-        logtoboth "Enabled shutdown-monitor.service"
+    systemctl enable ups-monitor.service &&
+        logtoboth "Enabled ups-monitor.service"
 
-    systemctl start shutdown-monitor.service &&
-        logtoboth "Started shutdown-monitor.service"
+    systemctl start ups-monitor.service &&
+        logtoboth "Started ups-monitor.service"
 
-    sudo systemctl enable bme280_sensor.service &&
-        logtoboth "Enabled bme280_sensor.service"
+    sudo systemctl enable read-bme280.service &&
+        logtoboth "Enabled read-bme280.service"
 
-    sudo systemctl start bme280_sensor.service &&
-        logtoboth "Started bme280_sensor.service"
+    sudo systemctl start read-bme280.service &&
+        logtoboth "Started read-bme280.service"
 
-    sudo systemctl enable birdnet_recording.service &&
-        logtoboth "Enabled birdnet_recording.service"
+    sudo systemctl enable record-sound.service &&
+        logtoboth "Enabled record-sound.service"
 
-    sudo systemctl start birdnet_recording.service &&
-        logtoboth "Started birdnet_recording.service"
+    sudo systemctl start record-sound.service &&
+        logtoboth "Started record-sound.service"
+
+    sudo systemctl enable run-birdnet.service &&
+        logtoboth "Enabled run-birdnet.service"
+
+    sudo systemctl start run-birdnet.service &&
+        logtoboth "Started run-birdnet.service"
+
+    sudo systemctl enable migrate-birdnet-data.service &&
+        logtoboth "Enabled migrate-birdnet-data.service"
+
+    sudo systemctl start migrate-birdnet-data.service &&
+        logtoboth "Started migrate-birdnet-data.service"
 
     # Set time zone to UTC for uniformity across clients
     timedatectl set-timezone UTC &&

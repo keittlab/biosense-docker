@@ -4,11 +4,16 @@ import os
 import sys
 import sqlite3
 import psycopg2
-import argparse
 from time import sleep, strftime
 import board
 from adafruit_bme280 import basic as adafruit_bme280
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import configparser
+from datetime import datetime
 from urllib.parse import urlparse
+import shutil
 
 # Activate the virtual environment
 venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
@@ -16,49 +21,28 @@ if os.path.exists(venv_path):
     with open(venv_path) as file_:
         exec(file_.read(), {'__file__': venv_path})
 
-# Initialize SQLite database
-def init_sqlite_db(db_path):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS bme280_readings (
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      timestamp TEXT NOT NULL,
-                      temperature REAL,
-                      humidity REAL,
-                      pressure REAL)''')
-    conn.commit()
-    return conn
+# SQLAlchemy setup
+Base = declarative_base()
 
-# Initialize PostgreSQL database
-def init_postgresql_db(conn_str):
-    try:
-        conn = psycopg2.connect(conn_str)
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS bme280_readings (
-                          id SERIAL PRIMARY KEY,
-                          timestamp TIMESTAMPTZ NOT NULL,
-                          temperature DOUBLE PRECISION,
-                          humidity DOUBLE PRECISION,
-                          pressure DOUBLE PRECISION)''')
-        conn.commit()
-        return conn
-    except psycopg2.OperationalError as e:
-        print(f"Could not connect to PostgreSQL database: {e}")
-        return None
+class BME280Reading(Base):
+    __tablename__ = 'bme280_readings'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    temperature = Column(Float)
+    humidity = Column(Float)
+    pressure = Column(Float)
+    latitude = Column(Float)
+    longitude = Column(Float)
 
-def record_bme280_readings_sqlite(conn, data):
-    cursor = conn.cursor()
-    timestamp = strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute('INSERT INTO bme280_readings (timestamp, temperature, humidity, pressure) VALUES (?, ?, ?, ?)',
-                   (timestamp, data['temp'], data['hum'], data['pres']))
-    conn.commit()
+def get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password):
+    if db_type == 'postgresql':
+        return create_engine(f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}')
+    else:
+        return create_engine(f'sqlite:///{db_path}')
 
-def record_bme280_readings_postgresql(conn, data):
-    cursor = conn.cursor()
-    timestamp = strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute('INSERT INTO bme280_readings (timestamp, temperature, humidity, pressure) VALUES (%s, %s, %s, %s)',
-                   (timestamp, data['temp'], data['hum'], data['pres']))
-    conn.commit()
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
 
 def initialize_sensor():
     i2c = board.I2C()
@@ -96,16 +80,15 @@ def get_sensor_data(bme280):
     return data
 
 def load_config(config_file):
-    config = {}
+    config = configparser.ConfigParser()
     try:
-        with open(config_file) as f:
-            for line in f:
-                if line.strip() and not line.startswith("#"):
-                    key, value = line.strip().split("=", 1)
-                    config[key] = value
-    except FileNotFoundError:
-        print(f"Configuration file '{config_file}' not found. Using command-line arguments or defaults.")
-    return config
+        config.read(config_file)
+        if not config.sections():
+            raise Exception("Configuration file is empty or not found.")
+        return config
+    except Exception as e:
+        print(f"Error reading configuration file: {e}")
+        sys.exit(1)
 
 def parse_db_conn(db_conn_str):
     db_url = urlparse(db_conn_str)
@@ -116,58 +99,57 @@ def parse_db_conn(db_conn_str):
     else:
         raise ValueError("Unsupported database type")
 
+def check_disk_usage(max_usage):
+    total, used, free = shutil.disk_usage("/")
+    return used / total * 100 > max_usage
+
 def main():
-    parser = argparse.ArgumentParser(description='Record BME280 sensor data.')
-    parser.add_argument('--config', type=str, default='/etc/biosense/sensor_config.conf', help='Path to configuration file')
-    parser.add_argument('--interval', type=int, help='Time interval between readings in seconds')
-    parser.add_argument('--db_conn', type=str, help='Database connection string')
-    parser.add_argument('--test_mode', action='store_true', help='Run in test mode')
-    parser.add_argument('--help', action='help', default=argparse.SUPPRESS, help='Show this help message and exit')
+    config_file = '/etc/biosense/read-bme280.conf'
+    config = load_config(config_file)
 
-    args = parser.parse_args()
-
-    # Load configuration from file
-    config = load_config(args.config)
-
-    # Override configuration with command-line arguments if provided
-    interval = args.interval if args.interval is not None else int(config.get('interval', 300))
-    db_conn = args.db_conn if args.db_conn is not None else config.get('db_conn', 'sqlite:///home/biosense/datastore/sensor_data.db')
-    test_mode = args.test_mode or config.get('test_mode', 'False').lower() == 'true'
+    interval = config.getint('DEFAULT', 'INTERVAL', fallback=300)
+    db_type = config.get('DEFAULT', 'DB_TYPE', fallback='sqlite')
+    db_path = config.get('DEFAULT', 'DB_PATH', fallback='/home/biosense/datastore/sensor_data.db')
+    db_host = config.get('DEFAULT', 'DB_HOST', fallback='localhost')
+    db_port = config.getint('DEFAULT', 'DB_PORT', fallback=5432)
+    db_name = config.get('DEFAULT', 'DB_NAME', fallback='biosense')
+    db_user = config.get('DEFAULT', 'DB_USER', fallback='biosense')
+    db_password = config.get('DEFAULT', 'DB_PASSWORD', fallback='biosense')
+    max_disk_usage = config.getint('DEFAULT', 'MAX_DISK_USAGE', fallback=90)
+    test_mode = config.getboolean('DEFAULT', 'TEST_MODE', fallback=False)
+    latitude = float(os.getenv('LATITUDE', '0.0'))
+    longitude = float(os.getenv('LONGITUDE', '0.0'))
 
     if test_mode:
         print("Running in test mode")
-        db_conn = 'sqlite:///home/biosense/datastore/test_sensor_data.db'
+        db_path = '/home/biosense/datastore/test_sensor_data.db'
+        db_type = 'sqlite'
 
-    db_type, db_conn_value = parse_db_conn(db_conn)
+    engine = get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password)
+    session = create_session(engine)
 
-    if db_type == 'sqlite':
-        conn = init_sqlite_db(db_conn_value)
-    elif db_type == 'postgresql':
-        conn = init_postgresql_db(db_conn_value)
-        if conn is None:
-            print("Falling back to SQLite")
-            db_conn_value = '/home/biosense/datastore/sensor_data.db'
-            conn = init_sqlite_db(db_conn_value)
-            db_type = 'sqlite'
+    Base.metadata.create_all(engine)
 
     bme280 = initialize_sensor()
 
     print(f"Recording BME280 readings to {db_type} database every {interval} seconds")
 
     while True:
+        if check_disk_usage(max_disk_usage):
+            print(f"{strftime('%Y-%m-%d %H:%M:%S')}: Disk usage is above {max_disk_usage}%. Stopping recording.")
+            sys.exit(1)
+
         data = get_sensor_data(bme280)
-        if db_type == 'sqlite':
-            record_bme280_readings_sqlite(conn, data)
-        elif db_type == 'postgresql':
-            try:
-                record_bme280_readings_postgresql(conn, data)
-            except psycopg2.OperationalError as e:
-                print(f"Error recording to PostgreSQL: {e}. Falling back to SQLite.")
-                db_conn_value = '/home/biosense/datastore/sensor_data.db'
-                conn = init_sqlite_db(db_conn_value)
-                db_type = 'sqlite'
-                record_bme280_readings_sqlite(conn, data)
-        print(f"Date: {strftime('%Y-%m-%d')}, Time: {strftime('%H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}")
+        new_reading = BME280Reading(
+            temperature=data['temp'],
+            humidity=data['hum'],
+            pressure=data['pres'],
+            latitude=latitude,
+            longitude=longitude
+        )
+        session.add(new_reading)
+        session.commit()
+        print(f"Date: {strftime('%Y-%m-%d')}, Time: {strftime('%H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}, Lat: {latitude}, Lon: {longitude}")
         sleep(interval)  # Sleep for the specified interval
 
 if __name__ == "__main__":

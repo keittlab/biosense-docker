@@ -1,0 +1,14 @@
+[Unit]
+Description=BME280 Sensor Data Recorder
+RequiresMountsFor=/home/biosense/datastore
+After=local-fs.target
+
+[Service]
+WorkingDirectory=/home/biosense/biosense_venv
+ExecStart=/home/biosense/biosense_venv/bin/python3 /usr/local/bin/read-bme280
+Restart=on-failure
+RestartSec=30
+User=biosense
+
+[Install]
+WantedBy=multi-user.target

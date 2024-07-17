@@ -5,9 +5,14 @@ import struct
 import configparser
 from smbus2 import SMBus
 import time
-import argparse
 import gpiod
 from subprocess import call
+
+# Activate the virtual environment
+venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
+if os.path.exists(venv_path):
+    with open(venv_path) as file_:
+        exec(file_.read(), {'__file__': venv_path})
 
 def readVoltage(bus, address):
     read = bus.read_word_data(address, 2)
@@ -22,7 +27,6 @@ def readCapacity(bus, address):
     return capacity
 
 def get_battery_status(voltage):
-    print(f"Debug: Checking battery status for voltage: {voltage:.2f}")
     if voltage > 3.78:
         return "Full"
     elif 3.7 <= voltage <= 3.78:
@@ -47,24 +51,30 @@ def ensure_single_instance(pidfile):
 
 def load_config(config_file):
     config = configparser.ConfigParser()
-    config.read(config_file)
-    return config
+    try:
+        config.read(config_file)
+        if not config.sections():
+            raise Exception("Configuration file is empty or not found.")
+        return config
+    except Exception as e:
+        print(f"Error reading configuration file: {e}")
+        sys.exit(1)
 
 def main():
-    config_file = '/etc/biosense/ups_monitor.conf'
+    config_file = '/etc/biosense/ups-monitor.conf'
     config = load_config(config_file)
 
-    shutdown_threshold = int(config['DEFAULT'].get('shutdown_threshold', 3))
-    pld_pin = int(config['DEFAULT'].get('pld_pin', 6))
-    battery_low_threshold = int(config['DEFAULT'].get('battery_low_threshold', 20))
-    voltage_threshold = float(config['DEFAULT'].get('voltage_threshold', 3.20))
-    check_interval = int(config['DEFAULT'].get('check_interval', 60))
-    shutdown_delay = int(config['DEFAULT'].get('shutdown_delay', 1))
-    bus_number = int(config['DEFAULT'].get('bus', 1))
-    address = int(config['DEFAULT'].get('address', 0x36), 16)
-    loop = config['DEFAULT'].get('loop', 'true').lower() == 'true'
+    shutdown_threshold = int(config['DEFAULT'].get('SHUTDOWN_THRESHOLD', 3))
+    pld_pin = int(config['DEFAULT'].get('PLD_PIN', 6))
+    battery_low_threshold = int(config['DEFAULT'].get('BATTERY_LOW_THRESHOLD', 20))
+    voltage_threshold = float(config['DEFAULT'].get('VOLTAGE_THRESHOLD', 3.20))
+    check_interval = int(config['DEFAULT'].get('CHECK_INTERVAL', 60))
+    shutdown_delay = int(config['DEFAULT'].get('SHUTDOWN_DELAY', 1))
+    bus_number = int(config['DEFAULT'].get('BUS', 1))
+    address = int(config['DEFAULT'].get('ADDRESS', 0x36), 16)
+    loop = config['DEFAULT'].get('LOOP', 'true').lower() == 'true'
 
-    pidfile = "/run/X1200.pid"
+    pidfile = "/run/ups-monitor.pid"
     ensure_single_instance(pidfile)
 
     shutdown_initiated = False
@@ -86,12 +96,10 @@ def main():
                 print(f"Capacity: {capacity:.2f}% ({battery_status}), AC Power State: {'Plugged in' if ac_power_state == 1 else 'Unplugged'}, Voltage: {voltage:.2f}V")
 
                 if ac_power_state == 1:
-                    # Cancel any pending shutdown if AC power is present
                     if shutdown_initiated:
                         call("sudo shutdown -c", shell=True)
                         shutdown_initiated = False
                         print("Shutdown canceled due to AC power restored.")
-                    # Reset failure counter and continue checking
                     failure_counter = 0
                 elif capacity < battery_low_threshold:
                     print("Battery level critical.")

@@ -7,6 +7,12 @@ import sys
 from subprocess import Popen, PIPE
 import configparser
 
+# Activate the virtual environment
+venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
+if os.path.exists(venv_path):
+    with open(venv_path) as file_:
+        exec(file_.read(), {'__file__': venv_path})
+
 # Function to read configuration with error handling
 def read_config(config_file):
     config = configparser.ConfigParser()
