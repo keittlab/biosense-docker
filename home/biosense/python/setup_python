@@ -1,0 +1,10 @@
+#!/bin/bash
+python3 -m venv /home/biosense/biosense_venv
+source /home/biosense/biosense_venv/bin/activate
+for wheel_file in /home/biosense/python/*.whl; do
+    /home/biosense/biosense_venv/bin/pip install \$wheel_file &&
+        rm -f \$wheel_file
+done
+if [ -f /home/biosense/python/requirements.txt ]; then
+    /home/biosense/biosense_venv/bin/pip install -r /home/biosense/python/requirements.txt
+fi

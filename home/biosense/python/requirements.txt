@@ -6,9 +6,5 @@ birdnetlib
 tflite-runtime
 librosa
 resampy
-psycopg2
-sqlite3
-board
-
-
-
+configparser
+psycopg2-binary

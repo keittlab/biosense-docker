@@ -1,7 +1,8 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import os
 import struct
+import configparser
 from smbus2 import SMBus
 import time
 import argparse
@@ -44,18 +45,24 @@ def ensure_single_instance(pidfile):
         with open(pidfile, 'w') as f:
             f.write(pid)
 
+def load_config(config_file):
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    return config
+
 def main():
-    parser = argparse.ArgumentParser(description='UPS Monitoring Script for Raspberry Pi')
-    parser.add_argument('--shutdown_threshold', type=int, default=3, help='Number of consecutive failures required for shutdown')
-    parser.add_argument('--pld_pin', type=int, default=6, help='GPIO pin for power loss detection')
-    parser.add_argument('--battery_low_threshold', type=int, default=20, help='Battery low percentage threshold')
-    parser.add_argument('--voltage_threshold', type=float, default=3.20, help='Voltage threshold for shutdown')
-    parser.add_argument('--check_interval', type=int, default=60, help='Time interval (seconds) between checks')
-    parser.add_argument('--shutdown_delay', type=int, default=1, help='Shutdown delay in minutes')
-    parser.add_argument('--bus', type=int, default=1, help='I2C bus number')
-    parser.add_argument('--address', type=int, default=0x36, help='I2C device address')
-    parser.add_argument('--loop', action='store_true', help='Enable looping')
-    args = parser.parse_args()
+    config_file = '/etc/biosense/ups_monitor.conf'
+    config = load_config(config_file)
+
+    shutdown_threshold = int(config['DEFAULT'].get('shutdown_threshold', 3))
+    pld_pin = int(config['DEFAULT'].get('pld_pin', 6))
+    battery_low_threshold = int(config['DEFAULT'].get('battery_low_threshold', 20))
+    voltage_threshold = float(config['DEFAULT'].get('voltage_threshold', 3.20))
+    check_interval = int(config['DEFAULT'].get('check_interval', 60))
+    shutdown_delay = int(config['DEFAULT'].get('shutdown_delay', 1))
+    bus_number = int(config['DEFAULT'].get('bus', 1))
+    address = int(config['DEFAULT'].get('address', 0x36), 16)
+    loop = config['DEFAULT'].get('loop', 'true').lower() == 'true'
 
     pidfile = "/run/X1200.pid"
     ensure_single_instance(pidfile)
@@ -63,16 +70,15 @@ def main():
     shutdown_initiated = False
 
     try:
-        bus = SMBus(args.bus)
-        address = args.address
+        bus = SMBus(bus_number)
         chip = gpiod.Chip('gpiochip4')
-        pld_line = chip.get_line(args.pld_pin)
+        pld_line = chip.get_line(pld_pin)
         pld_line.request(consumer="PLD", type=gpiod.LINE_REQ_DIR_IN)
 
         while True:
             failure_counter = 0
 
-            while failure_counter < args.shutdown_threshold:
+            while failure_counter < shutdown_threshold:
                 ac_power_state = pld_line.get_value()
                 voltage = readVoltage(bus, address)
                 battery_status = get_battery_status(voltage)
@@ -87,35 +93,35 @@ def main():
                         print("Shutdown canceled due to AC power restored.")
                     # Reset failure counter and continue checking
                     failure_counter = 0
-                elif capacity < args.battery_low_threshold:
+                elif capacity < battery_low_threshold:
                     print("Battery level critical.")
                     failure_counter += 1
-                elif voltage < args.voltage_threshold:
+                elif voltage < voltage_threshold:
                     print("Battery voltage critical.")
                     failure_counter += 1
                 else:
                     failure_counter = 0
 
-                if failure_counter < args.shutdown_threshold:
-                    time.sleep(args.check_interval)
+                if failure_counter < shutdown_threshold:
+                    time.sleep(check_interval)
                 else:
                     break
 
-            if failure_counter >= args.shutdown_threshold and not shutdown_initiated:
+            if failure_counter >= shutdown_threshold and not shutdown_initiated:
                 shutdown_reason = ""
-                if capacity < args.battery_low_threshold:
+                if capacity < battery_low_threshold:
                     shutdown_reason = "due to critical battery level."
-                elif voltage < args.voltage_threshold:
+                elif voltage < voltage_threshold:
                     shutdown_reason = "due to critical battery voltage."
 
                 shutdown_message = f"Critical condition met {shutdown_reason} Initiating shutdown."
                 print(shutdown_message)
-                call(f"nohup shutdown -h +{args.shutdown_delay} '{shutdown_message}' > /dev/null 2>&1", shell=True)
+                call(f"nohup shutdown -h +{shutdown_delay} '{shutdown_message}' > /dev/null 2>&1", shell=True)
                 shutdown_initiated = True
 
-            if not args.loop:
+            if not loop:
                 break
-            time.sleep(args.check_interval)
+            time.sleep(check_interval)
     finally:
         if os.path.isfile(pidfile):
             os.unlink(pidfile)

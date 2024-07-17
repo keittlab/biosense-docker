@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+
+import os
+import shutil
+import signal
+import sys
+import random
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Index, func
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import configparser
+import argparse
+from birdnetlib import Recording
+from birdnetlib.analyzer import Analyzer
+from birdnetlib.watcher import DirectoryWatcher
+from pprint import pprint
+
+# Function to read configuration with error handling
+def read_config(config_file):
+    config = configparser.ConfigParser()
+    try:
+        config.read(config_file)
+        if not config.sections():
+            raise Exception("Configuration file is empty or not found.")
+        return config
+    except Exception as e:
+        print(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="BirdNET Recording and Analysis Script")
+parser.add_argument('--test', action='store_true', help="Run in testing mode")
+args = parser.parse_args()
+
+# Read configuration
+config_file = '/etc/biosense/record-and-analyze-sound.conf'
+config = read_config(config_file)
+
+RECORDING_DIR = config.get('DEFAULT', 'RECORDING_DIR', fallback='/home/biosense/datastore/sounds_recordings/')
+EXPORT_DIR = config.get('DEFAULT', 'EXPORT_DIR', fallback='/home/biosense/datastore/sound_analysis_results/')
+MAX_DISK_USAGE = config.getint('DEFAULT', 'MAX_DISK_USAGE', fallback=90)
+DELETE_DISK_USAGE = config.getint('DEFAULT', 'DELETE_DISK_USAGE', fallback=80)
+RECORDING_DURATION = config.getint('DEFAULT', 'RECORDING_DURATION', fallback=15)
+SEGMENT_LENGTH = config.getint('DEFAULT', 'SEGMENT_LENGTH', fallback=3)
+DB_TYPE = config.get('DEFAULT', 'DB_TYPE', fallback='postgresql')  # or 'sqlite'
+DB_PATH = config.get('DEFAULT', 'DB_PATH', fallback='/home/biosense/datastore/birdnet_results.db')  # For SQLite
+DB_HOST = config.get('DEFAULT', 'DB_HOST', fallback='10.123.0.1')  # For PostgreSQL
+DB_PORT = config.getint('DEFAULT', 'DB_PORT', fallback=5432)  # For PostgreSQL
+DB_NAME = config.get('DEFAULT', 'DB_NAME', fallback='biosense')
+DB_USER = config.get('DEFAULT', 'DB_USER', fallback='biosense')  # For PostgreSQL
+DB_PASSWORD = config.get('DEFAULT', 'DB_PASSWORD', fallback='biosense')  # For PostgreSQL
+CHANNELS = config.getint('DEFAULT', 'CHANNELS', fallback=1)  # 1 for mono, 2 for stereo
+LATITUDE = float(config.get('DEFAULT', 'LATITUDE', fallback='0.0'))
+LONGITUDE = float(config.get('DEFAULT', 'LONGITUDE', fallback='0.0'))
+
+# Modify paths and table names for testing mode
+if args.test:
+    EXPORT_DIR = os.path.join(EXPORT_DIR, 'test')
+    DB_NAME = f"{DB_NAME}_test"
+
+# SQLAlchemy setup
+Base = declarative_base()
+
+class Detection(Base):
+    __tablename__ = 'birdnet_detections'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sci_name = Column(String, nullable=False)
+    com_name = Column(String, nullable=False)
+    confidence = Column(Float)
+    start_time = Column(Float)
+    end_time = Column(Float)
+    file_path = Column(String, nullable=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+Index('idx_sci_name', Detection.sci_name)
+
+def get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password):
+    if db_type == 'postgresql':
+        return create_engine(f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}')
+    else:
+        return create_engine(f'sqlite:///{db_path}')
+
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+# Create engines and sessions for both SQLite and PostgreSQL
+engine = get_engine(DB_TYPE, DB_PATH, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+session = create_session(engine)
+
+Base.metadata.create_all(engine)
+
+def on_analyze_complete(recording):
+    print(f"Analyzed: {recording.path}")
+    pprint(recording.detections)
+    extract_detected_segments(recording, EXPORT_DIR, SEGMENT_LENGTH)
+
+def on_error(recording, error):
+    print(f"Error: {error} in {recording.path}")
+
+def check_disk_usage():
+    total, used, free = shutil.disk_usage("/")
+    return used / total * 100
+
+def start_recording():
+    arecord_command = [
+        "arecord", "-f", "S16_LE", f"-c{CHANNELS}", "-r48000", "-t", "wav",
+        "--max-file-time", str(RECORDING_DURATION), "--use-strftime", f"{RECORDING_DIR}/%F-birdnet-%H:%M:%S.wav"
+    ]
+    return Popen(arecord_command, stdout=PIPE, stderr=PIPE)
+
+def extract_detected_segments(recording, export_dir, segment_length=3):
+    if not os.path.exists(export_dir):
+        os.makedirs(export_dir)
+
+    for detection in recording.detections:
+        start_time = detection['start_time']
+        end_time = detection['end_time']
+        common_name = detection['common_name'].replace(" ", "_")
+        confidence = detection['confidence']
+        
+        # Extract overlapping segments
+        current_start = start_time
+        while current_start < end_time:
+            current_end = min(current_start + segment_length, end_time)
+            segment_filename = f"{export_dir}/{common_name}_{current_start:.0f}s-{current_end:.0f}s_conf{confidence:.2f}.wav"
+            recording.extract_audio_segment(current_start, current_end, filename=segment_filename)
+            print(f"Extracted segment: {segment_filename}")
+            
+            # Save detection to the database
+            detection_data = Detection(
+                sci_name=detection['scientific_name'],
+                com_name=detection['common_name'],
+                confidence=detection['confidence'],
+                start_time=current_start,
+                end_time=current_end,
+                file_path=segment_filename,
+                latitude=LATITUDE,
+                longitude=LONGITUDE
+            )
+            session.add(detection_data)
+            current_start += segment_length / 2
+        session.commit()
+
+def delete_files_for_species(species_name):
+    detections = session.query(Detection).filter(Detection.sci_name == species_name, Detection.file_path.isnot(None)).all()
+    if detections:
+        detection = random.choice(detections)
+        try:
+            os.remove(detection.file_path)
+            detection.file_path = None
+            session.commit()
+            print(f"Deleted file: {detection.file_path}")
+        except Exception as e:
+            print(f"Error deleting file {detection.file_path}: {e}")
+            session.rollback()
+
+def delete_files_to_free_space():
+    species_counts = session.query(Detection.sci_name, func.count(Detection.id)).group_by(Detection.sci_name).order_by(func.count(Detection.id).desc()).all()
+    for species_name, _ in species_counts:
+        while check_disk_usage() > DELETE_DISK_USAGE:
+            delete_files_for_species(species_name)
+
+def main():
+    if not os.path.exists(RECORDING_DIR):
+        os.makedirs(RECORDING_DIR)
+    if not os.path.exists(EXPORT_DIR):
+        os.makedirs(EXPORT_DIR)
+
+    analyzer = Analyzer()
+    watcher = DirectoryWatcher(
+        RECORDING_DIR, analyzers=[analyzer], lon=0, lat=0,  # Dummy values as these are not used
+        date=datetime.now(), min_conf=0.3
+    )
+    watcher.on_analyze_complete = on_analyze_complete
+    watcher.on_error = on_error
+
+    record_process = start_recording()
+
+    def signal_handler(sig, frame):
+        record_process.terminate()
+        record_process.wait()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    try:
+        while True:
+            if check_disk_usage() > MAX_DISK_USAGE:
+                print("Disk usage high. Stopping recording.")
+                record_process.terminate()
+                record_process.wait()
+                sys.exit(0)
+            if check_disk_usage() > DELETE_DISK_USAGE:
+                delete_files_to_free_space()
+            watcher.watch()
+    except KeyboardInterrupt:
+        print("Gracefully exiting...")
+        record_process.terminate()
+        record_process.wait()
+
+if __name__ == "__main__":
+    main()

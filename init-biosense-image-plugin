@@ -49,9 +49,6 @@ copy_and_set_ownership() {
                     cp "$src_item" "$dest_item"
                     chown "$owner:$group" "$dest_item"
                 fi
-                echo "Copied and set ownership for $dest_item"
-            else
-                echo "Skipped existing item $dest_item"
             fi
         done
     else
@@ -71,34 +68,8 @@ if [ "$phase" == "0" ]; then
     plugin_printkeys
     mkdir -p $assetdir
 
-    # Check if there are SSH key files to copy
-    if ls /home/agent/hostdir/biosense_ssh_keys/* 1>/dev/null 2>&1; then
-        mkdir -p "$SDMPT/home/biosense/.ssh"
-        for key_file in /home/agent/hostdir/biosense_ssh_keys/*; do
-            cp "$key_file" "$SDMPT/home/biosense/.ssh"
-        done
-        logtoboth "Copied SSH keys to user biosense"
-    else
-        logtoboth "No SSH keys found, skipping copy step"
-    fi
-
-    # Copy the requirements.txt file if it exists
-    if [ -f /home/agent/hostdir/python/requirements.txt ]; then
-        cp /home/agent/hostdir/python/requirements.txt "$SDMPT/home/biosense"
-        logtoboth "Copied requirements.txt file to /home/biosense/requirements.txt"
-    else
-        logtoboth "requirements.txt file not found, skipping copy step"
-    fi
-
-    # Copy the python wheel files if they exist
-    if ls /home/agent/hostdir/python/*.whl 1>/dev/null 2>&1; then
-        for wheel_file in /home/agent/hostdir/python/*.whl; do
-            cp "$wheel_file" "$SDMPT/home/biosense/"
-        done
-        logtoboth "Copied python wheel files to /home/biosense/"
-    else
-        logtoboth "No python wheel files found, skipping copy step"
-    fi
+    # Biosense is not defined and 1000 *should* be the first user
+    copy_and_set_ownership /home/agent/hostdir/home/biosense $SDMPT/home/biosense 1000 1000
 
     # Copy etc files
     copy_and_set_ownership /home/agent/hostdir/etc $SDMPT/etc root root
@@ -118,32 +89,6 @@ elif [ "$phase" == "1" ]; then
     plugin_getargs $pfx "$args" "$vldargs" "$rqdargs"
     #logfreespace "at start of Plugin $pfx Phase 1"
 
-    # Set an autologout timer
-    echo "TMOUT=600" >/etc/profile.d/autologout.sh
-    echo "export TMOUT" >>/etc/profile.d/autologout.sh
-    chmod +x /etc/profile.d/autologout.sh
-    logtoboth "Automatic shell logout set to 10 minutes."
-
-    # Change this to copy the file from the 0piboot directory
-    cat >/etc/sdm/0piboot/010-config-eeprom.sh <<EOF
-#!/bin/bash
-echo '[all]' > /tmp/bootconf.txt
-echo "BOOT_UART=1" >> /tmp/bootconf.txt
-echo "POWER_OFF_ON_HALT=1" >> /tmp/bootconf.txt
-echo "PSU_MAX_CURRENT=5000" >> /tmp/bootconf.txt
-echo "BOOT_ORDER=0xf461" >> /tmp/bootconf.txt
-sudo rpi-eeprom-config --apply /tmp/bootconf.txt
-EOF
-    chmod +x /etc/sdm/0piboot/010-config-eeprom.sh
-
-    logtoboth "Created eeprom update script"
-
-    mkdir -m 0755 -p /home/biosense/dataqueue /home/biosense/datastore
-    chown biosense:biosense /home/biosense/dataqueue
-    chown biosense:biosense /home/biosense/datastore
-
-    logtoboth "Created dataqueue and datastore directories"
-
     raspi-config nonint do_change_locale C.UTF-8 &&
         logtoboth "Set locale to C.UTF-8"
 
@@ -151,33 +96,7 @@ EOF
         logtoboth "Set keymap to Generic 104-key PC"
 
     # Create a virtual environment and install packages from requirements.txt
-    sudo -u biosense bash <<EOF
-    cd
-    python3 -m venv /home/biosense/biosense_venv
-    source /home/biosense/biosense_venv/bin/activate
-    if [ -f /home/biosense/birdnetlib*.whl ]; then
-        /home/biosense/biosense_venv/bin/pip install /home/biosense/birdnetlib*.whl
-        rm -f /home/biosense/birdnetlib*.whl
-    else
-        curl -O https://files.pythonhosted.org/packages/ef/d7/13252c3c60ad1eafa2c78521e39be48d608c92c1e42d810f2ee91fc02b53/birdnetlib-0.17.2-py3-none-any.whl
-        if [ -f birdnetlib-0.17.2-py3-none-any.whl ]; then
-            /home/biosense/biosense_venv/bin/pip install birdnetlib-0.17.2-py3-none-any.whl
-            rm -f birdnetlib-0.17.2-py3-none-any.whl
-        else
-            /home/biosense/biosense_venv/bin/pip install birdnetlib
-        fi
-    fi
-    if ls *.whl 1>/dev/null 2>&1; then
-        for wheel_file in *.whl; do
-            /home/biosense/biosense_venv/bin/pip install \$wheel_file && \
-            rm -f \$wheel_file
-        done
-    fi
-    if [ -f /home/biosense/requirements.txt ]; then
-        /home/biosense/biosense_venv/bin/pip install -r /home/biosense/requirements.txt && \
-        rm -f /home/biosense/requirements.txt
-    fi
-EOF
+    sudo -u biosense /home/biosense/python/setup_python
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
 
@@ -190,9 +109,6 @@ elif [ "$phase" == "post-install" ]; then
     logtoboth "* Plugin $pfx: Start Phase post-install"
     plugin_getargs $pfx "$args" "$vldargs" "$rqdargs"
     #logfreespace "at start of Plugin $pfx Phase post-install"
-
-    chown -R biosense:biosense /home/biosense/.ssh
-    chmod -R go-rwx /home/biosense/.ssh
 
     logtoboth "* Plugin $pfx: Complete Phase post-install"
 fi

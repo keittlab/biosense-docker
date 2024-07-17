@@ -51,8 +51,7 @@ RUN mkdir /home/agent/hostdir
 # Install sdm utility
 RUN sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | sudo bash
 
-COPY sdm-biosense-setup-plugin /usr/local/sdm/local-plugins
-RUN sudo chmod +x /usr/local/sdm/local-plugins/sdm-biosense-setup-plugin
+COPY *-plugin /usr/local/sdm/local-plugins
 
 # Example command to run after verification (modify as needed)
 CMD ["bash"]

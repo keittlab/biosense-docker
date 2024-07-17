@@ -120,6 +120,12 @@ elif [ "$phase" == "post-install" ]; then
     sudo systemctl start bme280_sensor.service &&
         logtoboth "Started bme280_sensor.service"
 
+    sudo systemctl enable birdnet_recording.service &&
+        logtoboth "Enabled birdnet_recording.service"
+
+    sudo systemctl start birdnet_recording.service &&
+        logtoboth "Started birdnet_recording.service"
+
     # Set time zone to UTC for uniformity across clients
     timedatectl set-timezone UTC &&
         logtoboth "Set timezone to UTC"

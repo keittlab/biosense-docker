@@ -38,6 +38,3 @@ apps:"apps=wireguard,audacity,alsa-utils,sox,ffmpeg,libpython3-all-dev,i2c-tools
 raspiconfig:"i2c=0"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#git-clone
 #git-clone:"repo=https://github.com/suptronics/x120x.git|gitdir=/home/biosense/suptronics"
-
-
-
