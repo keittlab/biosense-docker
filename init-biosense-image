@@ -74,7 +74,7 @@ fi
 DOCKER_IMAGE_NAME="biosense-sdm"
 docker build -t "${DOCKER_IMAGE_NAME}" .
 
-SDM_COMMAND="sudo sdm --customize --extend --xmb 4096"
+SDM_COMMAND="sudo sdm --customize --extend --xmb 2048"
 if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
 fi
