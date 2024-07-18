@@ -35,7 +35,7 @@ Address = <placeholder>/16
 PublicKey = <the public wg key from the server>
 Endpoint = 129.116.71.233:51820
 AllowedIPs = 10.123.0.0/16
-PersistentKeepalive = 25
+PersistentKeepalive = 900
 ```
 
 The `PrivateKey` and `Address` fields will be filled out as part of the customization process. The script will print out a command to make the new device able to connect to the server over wireguard. You must email that command to me so I can run it on geo. Each time `finalize-biosense-image` is run, it will generate a new wireguard key-pair regardless of the wg-ip setting, so you have to update the server. You do not want to reuse the same wg-ip for multiple devices. The list of used ip's can be retrieved from the server's wireguard configuration, so ask me where to start adding wireguard ip numbers. 
