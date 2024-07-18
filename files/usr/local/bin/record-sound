@@ -8,6 +8,7 @@ import toml
 import logging
 from logging.handlers import RotatingFileHandler
 from subprocess import Popen, PIPE, TimeoutExpired
+from tempfile import NamedTemporaryFile
 
 # Configure logging
 log_dir = '/var/log/biosense/'
@@ -53,10 +54,10 @@ def check_disk_usage():
     total, used, free = shutil.disk_usage("/")
     return used / total * 100
 
-def start_recording():
+def start_recording(temp_file):
     arecord_command = [
         "arecord", "-f", "S16_LE", f"-c{CHANNELS}", "-r48000", "-t", "wav",
-        "--max-file-time", str(RECORDING_DURATION), "--use-strftime", f"{RECORDING_DIR}/%F-birdnet-%H:%M:%S.wav"
+        "--max-file-time", str(RECORDING_DURATION), temp_file.name
     ]
     logging.info(f"Starting recording with command: {' '.join(arecord_command)}")
     return Popen(arecord_command, stdout=PIPE, stderr=PIPE)
@@ -66,46 +67,51 @@ def main():
         os.makedirs(RECORDING_DIR)
         logging.info(f"Created recording directory: {RECORDING_DIR}")
 
-    record_process = start_recording()
+    with NamedTemporaryFile(delete=False, dir=RECORDING_DIR, prefix='tmp_recording_', suffix='.wav') as temp_file:
+        record_process = start_recording(temp_file)
 
-    def signal_handler(sig, frame):
-        logging.info("Terminating recording process.")
-        record_process.terminate()
-        record_process.wait()
-        logging.info("Recording process terminated.")
-        sys.exit(0)
+        def signal_handler(sig, frame):
+            logging.info("Terminating recording process.")
+            record_process.terminate()
+            record_process.wait()
+            logging.info("Recording process terminated.")
+            sys.exit(0)
 
-    signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
-    try:
-        while True:
-            if check_disk_usage() > MAX_DISK_USAGE:
-                logging.warning("Disk usage high. Stopping recording.")
-                record_process.terminate()
-                record_process.wait()
-                logging.info("Recording process terminated due to high disk usage.")
-                sys.exit(0)
+        try:
+            while True:
+                if check_disk_usage() > MAX_DISK_USAGE:
+                    logging.warning("Disk usage high. Stopping recording.")
+                    record_process.terminate()
+                    record_process.wait()
+                    logging.info("Recording process terminated due to high disk usage.")
+                    sys.exit(0)
 
-            try:
-                # Log stdout and stderr
-                stdout, stderr = record_process.communicate(timeout=5)
-                if stdout:
-                    logging.info(f"arecord stdout: {stdout.decode().strip()}")
-                if stderr:
-                    logging.error(f"arecord stderr: {stderr.decode().strip()}")
-            except TimeoutExpired:
-                logging.info("Recording in progress...")
+                try:
+                    # Log stdout and stderr
+                    stdout, stderr = record_process.communicate(timeout=5)
+                    if stdout:
+                        logging.info(f"arecord stdout: {stdout.decode().strip()}")
+                    if stderr:
+                        logging.error(f"arecord stderr: {stderr.decode().strip()}")
+                except TimeoutExpired:
+                    logging.info("Recording in progress...")
 
-    except KeyboardInterrupt:
-        logging.info("Gracefully exiting...")
-        record_process.terminate()
-        record_process.wait()
-        logging.info("Recording process terminated.")
-    except Exception as e:
-        logging.error(f"Exception occurred: {e}")
-        record_process.terminate()
-        record_process.wait()
-        logging.info("Recording process terminated due to an exception.")
+        except KeyboardInterrupt:
+            logging.info("Gracefully exiting...")
+            record_process.terminate()
+            record_process.wait()
+            logging.info("Recording process terminated.")
+        except Exception as e:
+            logging.error(f"Exception occurred: {e}")
+            record_process.terminate()
+            record_process.wait()
+            logging.info("Recording process terminated due to an exception.")
+        finally:
+            final_path = os.path.join(RECORDING_DIR, temp_file.name.replace('tmp_recording_', ''))
+            shutil.move(temp_file.name, final_path)
+            logging.info(f"Recording saved to {final_path}")
 
 if __name__ == "__main__":
     main()

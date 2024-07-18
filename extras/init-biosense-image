@@ -1,0 +1,146 @@
+#!/bin/bash
+
+IMAGE_SOURCE_DIR="source_images"
+IMAGE_DEST_DIR="customized_images"
+OVERWRITE=0
+DEBUG=0
+DISABLE_WIFI=0
+DISABLE_BLUETOOTH=0
+DISABLE_TRIGGERHAPPY=0
+DISABLE_SSH_PASSWORDS=0
+WIFI_SSID=""
+WIFI_PASSWORD=""
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--overwrite] [--debug] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--wifi-ssid <ssid>] [--wifi-password <password>]"
+    echo "  --source-dir <dir>        : Specify the directory for the source images (default: source_images)."
+    echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
+    echo "  --image-file <file>       : Path to the source image file. Can be a full path or just the filename."
+    echo "  --overwrite               : Overwrite the customized image file if it exists."
+    echo "  --debug                   : Run sdm without --batch option."
+    echo "  --disable-wifi            : Disable WiFi in the customized image."
+    echo "  --disable-bluetooth       : Disable Bluetooth in the customized image."
+    echo "  --disable-triggerhappy    : Disable Triggerhappy in the customized image."
+    echo "  --wifi-ssid <ssid>        : Specifies the WiFi SSID to enable."
+    echo "  --wifi-password <password>: Password for the wifi-ssid network."
+    exit 1
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+    --source-dir)
+        IMAGE_SOURCE_DIR=$2
+        shift 2
+        ;;
+    --dest-dir)
+        IMAGE_DEST_DIR=$2
+        shift 2
+        ;;
+    --image-file)
+        IMAGE_FILE=$(basename "$2")
+        shift 2
+        ;;
+    --overwrite)
+        OVERWRITE=1
+        shift
+        ;;
+    --debug)
+        DEBUG=1
+        shift
+        ;;
+    --disable-wifi)
+        DISABLE_WIFI=1
+        shift
+        ;;
+    --disable-bluetooth)
+        DISABLE_BLUETOOTH=1
+        shift
+        ;;
+    --disable-triggerhappy)
+        DISABLE_TRIGGERHAPPY=1
+        shift
+        ;;
+    --wifi-ssid)
+        WIFI_SSID=$2
+        shift 2
+        ;;
+    --wifi-password)
+        WIFI_PASSWORD=$2
+        shift 2
+        ;;
+    *)
+        echo "Invalid option: $1" 1>&2
+        usage
+        ;;
+    esac
+done
+
+if [[ -z "${IMAGE_FILE}" ]]; then
+    IMAGE_FILE=$(ls -t ${IMAGE_SOURCE_DIR}/*.img 2>/dev/null | head -n 1)
+    if [[ -z "$IMAGE_FILE" ]]; then
+        echo "No image files found in the source directory."
+        exit 1
+    fi
+    IMAGE_FILE="$(basename $IMAGE_FILE)"
+else
+    IMAGE_FILE="$(basename $IMAGE_FILE)"
+fi
+
+CUSTOMIZED_IMAGE_FILE="${IMAGE_DEST_DIR}/${IMAGE_FILE}"
+
+if [[ -f "${CUSTOMIZED_IMAGE_FILE}" ]]; then
+    if [[ ${OVERWRITE} -eq 1 ]]; then
+        echo "Overwriting existing file: ${CUSTOMIZED_IMAGE_FILE}"
+        cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+    else
+        echo "Customized image file already exists and overwrite option not set. Exiting."
+        exit 1
+    fi
+else
+    cp -a -f "${IMAGE_SOURCE_DIR}/${IMAGE_FILE}" "${CUSTOMIZED_IMAGE_FILE}"
+fi
+
+DOCKER_IMAGE_NAME="biosense-sdm"
+docker build -t "${DOCKER_IMAGE_NAME}" .
+
+SDM_COMMAND="sudo sdm --customize --extend --xmb 2048"
+if [[ ${DEBUG} -eq 0 ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --batch"
+fi
+
+# Construct the disables plugin string
+DISABLES=""
+if [[ ${DISABLE_WIFI} -eq 1 ]]; then
+    DISABLES="wifi|${DISABLES}"
+fi
+if [[ ${DISABLE_BLUETOOTH} -eq 1 ]]; then
+    DISABLES="bluetooth|${DISABLES}"
+fi
+if [[ ${DISABLE_TRIGGERHAPPY} -eq 1 ]]; then
+    DISABLES="triggerhappy|${DISABLES}"
+fi
+
+# Add the necessary plugins to the sdm command
+PLUGIN_ARGS=""
+[ -n "${WIFI_SSID}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}wifissid=${WIFI_SSID}|"
+[ -n "${WIFI_PASSWORD}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}wifipassword=${WIFI_PASSWORD}|"
+if [[ -n "${PLUGIN_ARGS}" ]]; then
+    PLUGIN_ARGS="${PLUGIN_ARGS%|}" # Remove trailing '|'
+    SDM_COMMAND="${SDM_COMMAND} --plugin network:\"${PLUGIN_ARGS}|noipv6\""
+fi
+
+if [[ -n "${DISABLES}" ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --plugin disables:\"${DISABLES%|}\""
+fi
+
+SDM_COMMAND="${SDM_COMMAND} \
+    --chroot \
+    --plugin @/home/agent/hostdir/sdm-plugin-commands \
+    --plugin /home/agent/hostdir/init-biosense-image-plugin \
+    /home/agent/hostdir/${CUSTOMIZED_IMAGE_FILE}"
+
+docker run --privileged -it --rm -v "$(pwd)":/home/agent/hostdir -v /dev:/dev "${DOCKER_IMAGE_NAME}" /bin/bash -c "${SDM_COMMAND}"
+
+exit 0

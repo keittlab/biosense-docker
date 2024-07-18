@@ -1,0 +1,186 @@
+#!/bin/bash
+
+# Load SDM parameters
+function loadparams() {
+    source "$SDMPT/etc/sdm/sdm-readparams"
+}
+
+# Function to add a note to the end of the customization process
+function plugin_addnote() {
+    local note="$1"
+    echo "$note" >>/etc/sdm/history
+    echo "$note"
+}
+
+# Helper function to copy file trees
+copy_and_set_ownership() {
+    local src_dir=$1
+    local dest_dir=$2
+    local owner=$3
+    local group=$4
+
+    if [ -d "$src_dir" ]; then
+        find "$src_dir" | while read -r src_item; do
+            # Get the relative path of the item from the source directory
+            rel_path="${src_item#$src_dir}"
+            dest_item="$dest_dir$rel_path"
+
+            # Check if the item exists in the destination
+            if [ ! -e "$dest_item" ]; then
+                if [ -d "$src_item" ]; then
+                    # Create the directory in the destination
+                    mkdir -p "$dest_item"
+                    chown "$owner:$group" "$dest_item"
+                elif [ -f "$src_item" ]; then
+                    # Copy the file to the destination
+                    cp "$src_item" "$dest_item"
+                    chown "$owner:$group" "$dest_item"
+                fi
+            fi
+        done
+    else
+        logtoboth "No files found in $src_dir"
+    fi
+}
+
+# Get the phase (0, 1, or post-install) and arguments
+phase=$1
+pfx="$(basename "$0")"
+args="$2"
+vldargs="|wg_ip|latitude|longitude|edit_sshd_config|wifissid|wifipassword|"
+reqargs="|wg_ip|latitude|longitude|"
+loadparams
+
+# Set the WireGuard interface name
+WG_INTERFACE="biosense"
+
+# Extract arguments
+plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
+
+if [ "$phase" == "0" ]; then
+    #
+    # In Phase 0 all references to directories in the image must be preceded by $SDMPT
+    #
+    logtoboth "* Plugin $pfx: Start Phase 0"
+    plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
+    #
+    # Print the keys found (example usage). plugin_getargs returns the list of found keys in $foundkeys
+    #
+    plugin_printkeys
+    mkdir -p $assetdir
+
+    # Log the values for debugging
+    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, edit_sshd_config=${edit_sshd_config}, wifissid=${wifissid}, wifipassword=${wifipassword}"
+
+    # Biosense is not defined and 1000 *should* be the first user
+    copy_and_set_ownership /home/agent/hostdir/files/home/biosense $SDMPT/home/biosense 1000 1000
+
+    # Copy etc files
+    copy_and_set_ownership /home/agent/hostdir/files/etc $SDMPT/etc root root
+
+    # Copy usr/local files
+    copy_and_set_ownership /home/agent/hostdir/files/usr/local $SDMPT/usr/local root root
+
+    # Copy var files
+    copy_and_set_ownership /home/agent/hostdir/files/var/log $SDMPT/var/log 1000 1000
+
+    logtoboth "Copied files to image"
+
+    logtoboth "* Plugin $pfx: Complete Phase 0"
+
+elif [ "$phase" == "1" ]; then
+    #
+    # Phase 1 (in nspawn)
+    #
+    logtoboth "* Plugin $pfx: Phase 1"
+
+    if [ -f "/etc/wireguard/template.conf" ]; then
+        # Generate WireGuard keys
+        mv /etc/wireguard/template.conf "/etc/wireguard/${WG_INTERFACE}.conf"
+        umask 077
+        wg genkey | tee /etc/wireguard/privatekey | wg pubkey >/etc/wireguard/publickey
+
+        PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
+        PUBLIC_KEY=$(cat /etc/wireguard/publickey)
+
+        # Update the client configuration
+        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "/etc/wireguard/${WG_INTERFACE}.conf"
+        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "/etc/wireguard/${WG_INTERFACE}.conf"
+
+        # Generate the command to append to the server configuration
+        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} persistent-keepalive 900 allowed-ips ${wg_ip}/32 "
+    else
+        logtoboth "template.conf not found in /etc/wireguard, skipping client configuration update"
+    fi
+
+    raspi-config nonint do_change_locale C.UTF-8 &&
+        logtoboth "Set locale to C.UTF-8"
+
+    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' &&
+        logtoboth "Set keymap to Generic 104-key PC"
+
+    # Create a virtual environment and install packages from requirements.txt
+    sudo -u biosense /home/biosense/python/setup-python
+
+    logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
+
+    logtoboth "* Plugin $pfx: Phase 1 completed"
+
+elif [ "$phase" == "post-install" ]; then
+    #
+    # Post-install edits
+    #
+    logtoboth "* Plugin $pfx: Phase post-install"
+
+    if [ "$edit_sshd_config" == "true" ]; then
+        # Edit sshd_config
+        echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
+            echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
+            logtoboth "Configured sshd_config"
+    fi
+
+    sudo systemctl enable wg-quick@${WG_INTERFACE} &&
+        logtoboth "Enabled wg-quick@${WG_INTERFACE} service"
+
+    sudo systemctl start wg-quick@${WG_INTERFACE} &&
+        logtoboth "Started wg-quick@${WG_INTERFACE} service"
+
+    systemctl enable ups-monitor.service &&
+        logtoboth "Enabled ups-monitor.service"
+
+    systemctl start ups-monitor.service &&
+        logtoboth "Started ups-monitor.service"
+
+    sudo systemctl enable read-bme280.service &&
+        logtoboth "Enabled read-bme280.service"
+
+    sudo systemctl start read-bme280.service &&
+        logtoboth "Started read-bme280.service"
+
+    sudo systemctl enable record-sound.service &&
+        logtoboth "Enabled record-sound.service"
+
+    sudo systemctl start record-sound.service &&
+        logtoboth "Started record-sound.service"
+
+    sudo systemctl enable run-birdnet.service &&
+        logtoboth "Enabled run-birdnet.service"
+
+    sudo systemctl start run-birdnet.service &&
+        logtoboth "Started run-birdnet.service"
+
+    sudo systemctl enable migrate-birdnet-data.service &&
+        logtoboth "Enabled migrate-birdnet-data.service"
+
+    sudo systemctl start migrate-birdnet-data.service &&
+        logtoboth "Started migrate-birdnet-data.service"
+
+    # Set time zone to UTC for uniformity across clients
+    timedatectl set-timezone UTC &&
+        logtoboth "Set timezone to UTC"
+
+    logtoboth "* Plugin $pfx: Phase post-install Completed"
+fi
+
+echo "done."
+exit 0
