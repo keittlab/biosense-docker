@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+
+import os
+import shutil
+import signal
+import sys
+import toml
+import logging
+from logging.handlers import RotatingFileHandler
+from subprocess import Popen, PIPE, TimeoutExpired
+
+# Configure logging
+log_dir = '/var/log/biosense/'
+log_file = os.path.join(log_dir, 'record-sound.log')
+log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
+logging.basicConfig(level=logging.INFO, handlers=[log_handler],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Activate the virtual environment
+venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
+if os.path.exists(venv_path):
+    with open(venv_path) as file_:
+        exec(file_.read(), {'__file__': venv_path})
+
+# Function to read configuration with error handling
+def read_config(config_file):
+    try:
+        if not os.path.exists(config_file):
+            raise Exception(f"Configuration file does not exist: {config_file}")
+
+        logging.info(f"Reading configuration file: {config_file}")
+        with open(config_file, 'r') as f:
+            content = toml.load(f)
+        
+        if not content:
+            raise Exception("Configuration file is empty or not found.")
+        
+        return content['DEFAULT']
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
+# Read configuration
+config_file = '/etc/biosense/record-sound.conf'
+config = read_config(config_file)
+
+RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sounds_recordings/')
+MAX_DISK_USAGE = int(config.get('MAX_DISK_USAGE', 90))
+RECORDING_DURATION = int(config.get('RECORDING_DURATION', 15))
+CHANNELS = int(config.get('CHANNELS', 1))  # 1 for mono, 2 for stereo
+
+def check_disk_usage():
+    total, used, free = shutil.disk_usage("/")
+    return used / total * 100
+
+def start_recording():
+    arecord_command = [
+        "arecord", "-f", "S16_LE", f"-c{CHANNELS}", "-r48000", "-t", "wav",
+        "--max-file-time", str(RECORDING_DURATION), "--use-strftime", f"{RECORDING_DIR}/%F-birdnet-%H:%M:%S.wav"
+    ]
+    logging.info(f"Starting recording with command: {' '.join(arecord_command)}")
+    return Popen(arecord_command, stdout=PIPE, stderr=PIPE)
+
+def main():
+    if not os.path.exists(RECORDING_DIR):
+        os.makedirs(RECORDING_DIR)
+        logging.info(f"Created recording directory: {RECORDING_DIR}")
+
+    record_process = start_recording()
+
+    def signal_handler(sig, frame):
+        logging.info("Terminating recording process.")
+        record_process.terminate()
+        record_process.wait()
+        logging.info("Recording process terminated.")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    try:
+        while True:
+            if check_disk_usage() > MAX_DISK_USAGE:
+                logging.warning("Disk usage high. Stopping recording.")
+                record_process.terminate()
+                record_process.wait()
+                logging.info("Recording process terminated due to high disk usage.")
+                sys.exit(0)
+
+            try:
+                # Log stdout and stderr
+                stdout, stderr = record_process.communicate(timeout=5)
+                if stdout:
+                    logging.info(f"arecord stdout: {stdout.decode().strip()}")
+                if stderr:
+                    logging.error(f"arecord stderr: {stderr.decode().strip()}")
+            except TimeoutExpired:
+                logging.info("Recording in progress...")
+
+    except KeyboardInterrupt:
+        logging.info("Gracefully exiting...")
+        record_process.terminate()
+        record_process.wait()
+        logging.info("Recording process terminated.")
+    except Exception as e:
+        logging.error(f"Exception occurred: {e}")
+        record_process.terminate()
+        record_process.wait()
+        logging.info("Recording process terminated due to an exception.")
+
+if __name__ == "__main__":
+    main()

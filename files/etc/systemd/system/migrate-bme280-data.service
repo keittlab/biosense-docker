@@ -1,0 +1,14 @@
+[Unit]
+Description=Migrate BME280 Data from SQLite to PostgreSQL
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /path/to/migrate-bme280-data.py
+WorkingDirectory=/path/to/
+Restart=on-failure
+User=biosense
+Group=biosense
+
+[Install]
+WantedBy=multi-user.target

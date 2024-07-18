@@ -1,0 +1,10 @@
+apscheduler
+adafruit-circuitpython-bme280
+adafruit-circuitpython-seesaw
+smbus2
+birdnetlib
+tflite-runtime
+librosa
+resampy
+toml
+psycopg2-binary

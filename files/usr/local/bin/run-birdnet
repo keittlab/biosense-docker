@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+
+import os
+import time
+import signal
+import sys
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Index
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import toml
+import logging
+from logging.handlers import RotatingFileHandler
+from birdnetlib import Recording
+from birdnetlib.analyzer import Analyzer
+from pprint import pprint
+
+# Configure logging
+log_dir = '/var/log/biosense/'
+log_file = os.path.join(log_dir, 'run-birdnet.log')
+log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
+logging.basicConfig(level=logging.INFO, handlers=[log_handler],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Activate the virtual environment
+venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
+if os.path.exists(venv_path):
+    with open(venv_path) as file_:
+        exec(file_.read(), {'__file__': venv_path})
+
+# Function to read configuration with error handling
+def read_config(config_file):
+    try:
+        if not os.path.exists(config_file):
+            raise Exception(f"Configuration file does not exist: {config_file}")
+
+        logging.info(f"Reading configuration file: {config_file}")
+        with open(config_file, 'r') as f:
+            content = toml.load(f)
+        
+        if not content:
+            raise Exception("Configuration file is empty or not found.")
+        
+        return content['DEFAULT']
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
+# Read configuration
+config_file = '/etc/biosense/run-birdnet.conf'
+config = read_config(config_file)
+
+RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sounds_recordings/')
+EXPORT_DIR = config.get('EXPORT_DIR', '/home/biosense/datastore/sound_analysis_results/')
+SEGMENT_LENGTH = int(config.get('SEGMENT_LENGTH', 3))
+DB_TYPE = config.get('DB_TYPE', 'postgresql')  # or 'sqlite'
+DB_PATH = config.get('DB_PATH', '/home/biosense/datastore/birdnet_results.db')  # For SQLite
+DB_HOST = config.get('DB_HOST', '10.123.0.1')  # For PostgreSQL
+DB_PORT = int(config.get('DB_PORT', 5432))  # For PostgreSQL
+DB_NAME = config.get('DB_NAME', 'biosense')
+DB_USER = config.get('DB_USER', 'biosense')  # For PostgreSQL
+DB_PASSWORD = config.get('DB_PASSWORD', 'biosense')  # For PostgreSQL
+
+# Get latitude and longitude from environment variables
+LATITUDE = float(os.getenv('LATITUDE', '0.0'))
+LONGITUDE = float(os.getenv('LONGITUDE', '0.0'))
+
+# SQLAlchemy setup
+Base = declarative_base()
+
+class Detection(Base):
+    __tablename__ = 'birdnet_detections'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sci_name = Column(String, nullable=False)
+    com_name = Column(String, nullable=False)
+    confidence = Column(Float)
+    start_time = Column(Float)
+    end_time = Column(Float)
+    file_path = Column(String, nullable=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+Index('idx_sci_name', Detection.sci_name)
+
+def get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password):
+    if db_type == 'postgresql':
+        return create_engine(f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}')
+    else:
+        return create_engine(f'sqlite:///{db_path}')
+
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+# Create engines and sessions for both SQLite and PostgreSQL
+engine = get_engine(DB_TYPE, DB_PATH, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+session = create_session(engine)
+
+Base.metadata.create_all(engine)
+
+def on_analyze_complete(recording):
+    logging.info(f"Analyzed: {recording.path}")
+    pprint(recording.detections)
+    extract_detected_segments(recording, EXPORT_DIR, SEGMENT_LENGTH)
+
+def on_error(recording, error):
+    logging.error(f"Error: {error} in {recording.path}")
+
+def extract_detected_segments(recording, export_dir, segment_length=3):
+    if not os.path.exists(export_dir):
+        os.makedirs(export_dir)
+
+    for detection in recording.detections:
+        start_time = detection['start_time']
+        end_time = detection['end_time']
+        common_name = detection['common_name'].replace(" ", "_")
+        confidence = detection['confidence']
+        
+        # Ensure each segment is exactly 3 seconds long
+        current_start = start_time
+        while current_start + segment_length <= end_time:
+            segment_filename = f"{export_dir}/{common_name}_{current_start:.0f}s-{current_start + segment_length:.0f}s_conf{confidence:.2f}.wav"
+            recording.extract_audio_segment(current_start, current_start + segment_length, filename=segment_filename)
+            logging.info(f"Extracted segment: {segment_filename}")
+            
+            # Save detection to the database
+            detection_data = Detection(
+                sci_name=detection['scientific_name'],
+                com_name=detection['common_name'],
+                confidence=detection['confidence'],
+                start_time=current_start,
+                end_time=current_start + segment_length,
+                file_path=segment_filename,
+                latitude=LATITUDE,
+                longitude=LONGITUDE
+            )
+            session.add(detection_data)
+            current_start += segment_length / 2
+        session.commit()
+
+def analyze_recordings():
+    analyzer = Analyzer()
+
+    while True:
+        for filename in os.listdir(RECORDING_DIR):
+            if filename.endswith(".wav"):
+                filepath = os.path.join(RECORDING_DIR, filename)
+                recording = Recording(analyzer, filepath, lat=LATITUDE, lon=LONGITUDE)
+                try:
+                    recording.analyze()
+                    on_analyze_complete(recording)
+                    os.remove(filepath)  # Remove the file after processing
+                except Exception as e:
+                    on_error(recording, e)
+        time.sleep(10)
+
+def main():
+    def signal_handler(sig, frame):
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    analyze_recordings()
+
+if __name__ == "__main__":
+    main()
