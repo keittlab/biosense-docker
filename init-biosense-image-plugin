@@ -69,13 +69,16 @@ if [ "$phase" == "0" ]; then
     mkdir -p $assetdir
 
     # Biosense is not defined and 1000 *should* be the first user
-    copy_and_set_ownership /home/agent/hostdir/home/biosense $SDMPT/home/biosense 1000 1000
+    copy_and_set_ownership /home/agent/hostdir/files/home/biosense $SDMPT/home/biosense 1000 1000
 
     # Copy etc files
-    copy_and_set_ownership /home/agent/hostdir/etc $SDMPT/etc root root
+    copy_and_set_ownership /home/agent/hostdir/files/etc $SDMPT/etc root root
 
     # Copy usr/local files
-    copy_and_set_ownership /home/agent/hostdir/usr/local $SDMPT/usr/local root root
+    copy_and_set_ownership /home/agent/hostdir/files/usr/local $SDMPT/usr/local root root
+
+    # Copy var files
+    copy_and_set_ownership /home/agent/hostdir/files/var/log $SDMPT/var/log 1000 1000
 
     logtoboth "Copied files to image"
 
@@ -96,7 +99,7 @@ elif [ "$phase" == "1" ]; then
         logtoboth "Set keymap to Generic 104-key PC"
 
     # Create a virtual environment and install packages from requirements.txt
-    sudo -u biosense /home/biosense/python/setup_python
+    sudo -u biosense /home/biosense/python/setup-python
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
 

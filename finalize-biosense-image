@@ -1,7 +1,7 @@
 #!/bin/bash
 
 IMAGE_SOURCE_DIR="customized_images"
-IMAGE_DEST_DIR="customized_images"
+IMAGE_DEST_DIR="ready_for_imaging"
 DEBUG=0
 WG_IP=""
 WIFI_COUNTRY="US"
@@ -23,7 +23,7 @@ usage() {
     echo "Usage: $0 --wg-ip <wg_ip> [--source-dir <dir>] [--dest-dir <dir>] [--image-file <file>] [--overwrite] [--debug] [--config-file <file>] [--save-config <file>] [--update-config] [--disable-wifi] [--disable-bluetooth] [--disable-triggerhappy] [--wifi-country <countryname>] [--wifi-ssid <ssid>] [--wifi-password <password>] [--latitude <latitude>] [--longitude <longitude>] [--disable-ssh-passwords]"
     echo "  --wg-ip <wg_ip>           : Set the WireGuard IP for the customized image."
     echo "  --source-dir <dir>        : Specify the directory for the source images (default: customized_images)."
-    echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: customized_images)."
+    echo "  --dest-dir <dir>          : Specify the directory for the customized images (default: ready_for_imaging)."
     echo "  --image-file <file>       : Path to the source image file. Can be a full path or just the filename."
     echo "  --overwrite               : Overwrite the customized image file if it exists."
     echo "  --debug                   : Run sdm without --batch option."
@@ -274,6 +274,9 @@ else
         rm -f "${CUSTOMIZED_IMAGE_FILE}"
     fi
 fi
+
+# Ensure the destination directory exists
+mkdir -p "${IMAGE_DEST_DIR}"
 
 DOCKER_IMAGE_NAME="biosense-sdm"
 docker build -t "${DOCKER_IMAGE_NAME}" .

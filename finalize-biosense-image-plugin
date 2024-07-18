@@ -66,25 +66,23 @@ elif [ "$phase" == "1" ]; then
     chmod +x /etc/profile.d/geolocation.sh
     logtoboth "Set geolocation environment variables"
 
-    WG_DIR="/etc/wireguard"
-    if [ -f "$WG_DIR/${WG_INTERFACE}.conf" ]; then
+    if [ -f "/etc/wireguard/template.conf" ]; then
         # Generate WireGuard keys
-        mkdir -p "$WG_DIR"
-        cd "$WG_DIR" || exit
+        mv /etc/wireguard/template.conf "/etc/wireguard/${WG_INTERFACE}.conf"
         umask 077
-        wg genkey | tee privatekey | wg pubkey >publickey
+        wg genkey | tee /etc/wireguard/privatekey | wg pubkey >/etc/wireguard/publickey
 
-        PRIVATE_KEY=$(cat privatekey)
-        PUBLIC_KEY=$(cat publickey)
+        PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
+        PUBLIC_KEY=$(cat /etc/wireguard/publickey)
 
         # Update the client configuration
-        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "${WG_DIR}/${WG_INTERFACE}.conf"
-        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "${WG_DIR}/${WG_INTERFACE}.conf"
+        sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "/etc/wireguard/${WG_INTERFACE}.conf"
+        sed -i "s|Address = .*|Address = ${wg_ip}/16|" "/etc/wireguard/${WG_INTERFACE}.conf"
 
         # Generate the command to append to the server configuration
         plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} persistent-keepalive 900 allowed-ips ${wg_ip}/32 "
     else
-        logtoboth "${WG_INTERFACE}.conf not found in /etc/wireguard, skipping client configuration update"
+        logtoboth "template.conf not found in /etc/wireguard, skipping client configuration update"
     fi
 
     logtoboth "* Plugin $pfx: Phase 1 completed"
