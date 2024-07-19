@@ -1,0 +1,123 @@
+import os
+import toml
+import logging
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
+
+# Configure logging
+log_dir = '/var/log/biosense/'
+log_file = os.path.join(log_dir, 'check_discrepancies.log')
+logging.basicConfig(level=logging.INFO, handlers=[logging.FileHandler(log_file)],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Function to read configuration
+def read_config(config_file):
+    try:
+        if not os.path.exists(config_file):
+            raise Exception(f"Configuration file does not exist: {config_file}")
+
+        logging.info(f"Reading configuration file: {config_file}")
+        with open(config_file, 'r') as f:
+            content = toml.load(f)
+        
+        if not content:
+            raise Exception("Configuration file is empty or not found.")
+        
+        return content['DEFAULT']
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        raise
+
+# Read configuration
+config_file = '/etc/biosense/run-birdnet.conf'
+config = read_config(config_file)
+
+RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sound_recordings/')
+EXPORT_DIR = config.get('EXPORT_DIR', '/home/biosense/datastore/sound_analysis_results/')
+DB_TYPE = config.get('DB_TYPE', 'postgresql')  # or 'sqlite'
+DB_PATH = config.get('DB_PATH', '/home/biosense/datastore/birdnet_results.db')  # For SQLite
+DB_HOST = config.get('DB_HOST', '10.123.0.1')  # For PostgreSQL
+DB_PORT = int(config.get('DB_PORT', 5432))  # For PostgreSQL
+DB_NAME = config.get('DB_NAME', 'biosense')
+DB_USER = config.get('DB_USER', 'biosense')  # For PostgreSQL
+DB_PASSWORD = config.get('DB_PASSWORD', 'biosense')  # For PostgreSQL
+
+# SQLAlchemy setup
+Base = declarative_base()
+
+class Detection(Base):
+    __tablename__ = 'birdnet_detections'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sci_name = Column(String, nullable=False)
+    com_name = Column(String, nullable=False)
+    confidence = Column(Float)
+    start_time = Column(Float)
+    end_time = Column(Float)
+    file_path = Column(String, nullable=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+def get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password):
+    if db_type == 'postgresql':
+        return create_engine(f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}')
+    else:
+        return create_engine(f'sqlite:///{db_path}')
+
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+# Create engine and session
+engine = get_engine(DB_TYPE, DB_PATH, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+session = create_session(engine)
+
+# Ensure the table exists
+Base.metadata.create_all(engine)
+
+def fetch_database_files(session):
+    try:
+        files = session.query(Detection.file_path).all()
+        return [file[0] for file in files if file[0]]
+    except OperationalError as e:
+        logging.error(f"Database error: {e}")
+        return []
+
+def list_directory_files(directory):
+    try:
+        return [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    except Exception as e:
+        logging.error(f"Error listing directory files: {e}")
+        return []
+
+def check_discrepancies(db_files, dir_files):
+    db_files_set = set(db_files)
+    dir_files_set = set(dir_files)
+
+    missing_in_db = dir_files_set - db_files_set
+    missing_in_dir = db_files_set - dir_files_set
+
+    return missing_in_db, missing_in_dir
+
+def main():
+    logging.info("Starting discrepancy check...")
+
+    db_files = fetch_database_files(session)
+    dir_files = list_directory_files(EXPORT_DIR)
+
+    missing_in_db, missing_in_dir = check_discrepancies(db_files, dir_files)
+
+    if missing_in_db:
+        logging.warning(f"Files present in directory but missing in database: {missing_in_db}")
+    else:
+        logging.info("No files missing in database.")
+
+    if missing_in_dir:
+        logging.warning(f"Files present in database but missing in directory: {missing_in_dir}")
+    else:
+        logging.info("No files missing in directory.")
+
+if __name__ == "__main__":
+    main()

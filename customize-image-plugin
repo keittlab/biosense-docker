@@ -124,6 +124,13 @@ elif [ "$phase" == "1" ]; then
 
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
 
+    echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
+    echo "export LATITUDE" >>/etc/profile.d/geolocation.sh
+    echo "LONGITUDE=${longitude}" >>/etc/profile.d/geolocation.sh
+    echo "export LONGITUDE" >>/etc/profile.d/geolocation.sh
+
+    logtoboth "Added latitude and longitude environment variables"
+
     logtoboth "* Plugin $pfx: Phase 1 completed"
 
 elif [ "$phase" == "post-install" ]; then

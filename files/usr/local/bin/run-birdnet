@@ -4,6 +4,7 @@ import os
 import time
 import signal
 import sys
+import random
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Index
 from sqlalchemy.ext.declarative import declarative_base
@@ -14,6 +15,8 @@ from logging.handlers import RotatingFileHandler
 from birdnetlib import Recording
 from birdnetlib.analyzer import Analyzer
 from pprint import pprint
+import shutil
+from uuid import uuid4
 
 # Configure logging
 log_dir = '/var/log/biosense/'
@@ -21,12 +24,6 @@ log_file = os.path.join(log_dir, 'run-birdnet.log')
 log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
 logging.basicConfig(level=logging.INFO, handlers=[log_handler],
                     format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Activate the virtual environment
-venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
-if os.path.exists(venv_path):
-    with open(venv_path) as file_:
-        exec(file_.read(), {'__file__': venv_path})
 
 # Function to read configuration with error handling
 def read_config(config_file):
@@ -50,7 +47,7 @@ def read_config(config_file):
 config_file = '/etc/biosense/run-birdnet.conf'
 config = read_config(config_file)
 
-RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sounds_recordings/')
+RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sound_recordings/')
 EXPORT_DIR = config.get('EXPORT_DIR', '/home/biosense/datastore/sound_analysis_results/')
 SEGMENT_LENGTH = int(config.get('SEGMENT_LENGTH', 3))
 DB_TYPE = config.get('DB_TYPE', 'postgresql')  # or 'sqlite'
@@ -60,6 +57,8 @@ DB_PORT = int(config.get('DB_PORT', 5432))  # For PostgreSQL
 DB_NAME = config.get('DB_NAME', 'biosense')
 DB_USER = config.get('DB_USER', 'biosense')  # For PostgreSQL
 DB_PASSWORD = config.get('DB_PASSWORD', 'biosense')  # For PostgreSQL
+DISK_SPACE_THRESHOLD = float(config.get('DISK_SPACE_THRESHOLD', 0.80))  # Default to 80%
+DISK_FULL_THRESHOLD = float(config.get('DISK_FULL_THRESHOLD', 0.95))  # Default to 95%
 
 # Get latitude and longitude from environment variables
 LATITUDE = float(os.getenv('LATITUDE', '0.0'))
@@ -93,8 +92,22 @@ def create_session(engine):
     Session = sessionmaker(bind=engine)
     return Session()
 
+# Function to create engine with fallback to SQLite
+def create_engine_with_fallback():
+    try:
+        logging.info("Attempting to connect to PostgreSQL database.")
+        engine = get_engine(DB_TYPE, DB_PATH, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+        # Test connection
+        connection = engine.connect()
+        connection.close()
+        logging.info("Connected to PostgreSQL database.")
+    except Exception as e:
+        logging.error(f"Error connecting to PostgreSQL database: {e}. Falling back to SQLite.")
+        engine = get_engine('sqlite', DB_PATH, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+    return engine
+
 # Create engines and sessions for both SQLite and PostgreSQL
-engine = get_engine(DB_TYPE, DB_PATH, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+engine = create_engine_with_fallback()
 session = create_session(engine)
 
 Base.metadata.create_all(engine)
@@ -103,6 +116,12 @@ def on_analyze_complete(recording):
     logging.info(f"Analyzed: {recording.path}")
     pprint(recording.detections)
     extract_detected_segments(recording, EXPORT_DIR, SEGMENT_LENGTH)
+    # Delete the recording after successful analysis
+    try:
+        os.remove(recording.path)
+        logging.info(f"Deleted recording: {recording.path}")
+    except Exception as e:
+        logging.error(f"Error deleting recording: {recording.path} - {e}")
 
 def on_error(recording, error):
     logging.error(f"Error: {error} in {recording.path}")
@@ -111,49 +130,78 @@ def extract_detected_segments(recording, export_dir, segment_length=3):
     if not os.path.exists(export_dir):
         os.makedirs(export_dir)
 
+    # Extract audio segments of detections using BirdNET's method
+    recording.extract_detections_as_audio(directory=export_dir)
+
     for detection in recording.detections:
-        start_time = detection['start_time']
-        end_time = detection['end_time']
-        common_name = detection['common_name'].replace(" ", "_")
-        confidence = detection['confidence']
-        
-        # Ensure each segment is exactly 3 seconds long
-        current_start = start_time
-        while current_start + segment_length <= end_time:
-            segment_filename = f"{export_dir}/{common_name}_{current_start:.0f}s-{current_start + segment_length:.0f}s_conf{confidence:.2f}.wav"
-            recording.extract_audio_segment(current_start, current_start + segment_length, filename=segment_filename)
-            logging.info(f"Extracted segment: {segment_filename}")
-            
-            # Save detection to the database
-            detection_data = Detection(
-                sci_name=detection['scientific_name'],
-                com_name=detection['common_name'],
-                confidence=detection['confidence'],
-                start_time=current_start,
-                end_time=current_start + segment_length,
-                file_path=segment_filename,
-                latitude=LATITUDE,
-                longitude=LONGITUDE
-            )
+        # Rename the extracted file to include the detection ID
+        old_segment_filename = detection['extracted_audio_path']
+        new_segment_filename = os.path.join(export_dir, f"detection_{uuid4()}.flac")
+        os.rename(old_segment_filename, new_segment_filename)
+        logging.info(f"Extracted segment: {new_segment_filename}")
+
+        # Save detection to the database
+        detection_data = Detection(
+            sci_name=detection['scientific_name'],
+            com_name=detection['common_name'],
+            confidence=detection['confidence'],
+            start_time=detection['start_time'],
+            end_time=detection['end_time'],
+            file_path=new_segment_filename,
+            latitude=LATITUDE,
+            longitude=LONGITUDE
+        )
+        try:
+            logging.info(f"Attempting to write detection to database: {detection_data}")
             session.add(detection_data)
-            current_start += segment_length / 2
-        session.commit()
+            session.commit()
+            logging.info("Detection written to database successfully.")
+        except Exception as e:
+            logging.error(f"Error writing to database: {e}")
+            session.rollback()
 
 def analyze_recordings():
     analyzer = Analyzer()
 
     while True:
-        for filename in os.listdir(RECORDING_DIR):
+        logging.info("Starting to analyze recordings.")
+        files = os.listdir(RECORDING_DIR)
+        if not files:
+            logging.info("No recordings found in the directory.")
+        for filename in files:
             if filename.endswith(".wav"):
                 filepath = os.path.join(RECORDING_DIR, filename)
+                logging.info(f"Processing file: {filepath}")
                 recording = Recording(analyzer, filepath, lat=LATITUDE, lon=LONGITUDE)
                 try:
                     recording.analyze()
                     on_analyze_complete(recording)
-                    os.remove(filepath)  # Remove the file after processing
                 except Exception as e:
                     on_error(recording, e)
         time.sleep(10)
+
+def get_most_common_category(session):
+    results = session.query(Detection.com_name).all()
+    categories = [result.com_name for result in results]
+    if categories:
+        return max(set(categories), key=categories.count)
+    return None
+
+def delete_old_recordings(most_common_category):
+    files = [f for f in os.listdir(RECORDING_DIR) if f.startswith(most_common_category)]
+    if files:
+        file_to_delete = random.choice(files)
+        file_path = os.path.join(RECORDING_DIR, file_to_delete)
+        try:
+            os.remove(file_path)
+            logging.info(f"Deleted old recording: {file_path}")
+        except Exception as e:
+            logging.error(f"Error deleting file: {file_path} - {e}")
+
+def check_disk_space():
+    total, used, free = shutil.disk_usage(RECORDING_DIR)
+    logging.info(f"Disk usage: {used}/{total} bytes used, {free} bytes free.")
+    return free / total
 
 def main():
     def signal_handler(sig, frame):
@@ -161,7 +209,18 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    analyze_recordings()
+    logging.info("Starting main loop.")
+    while True:
+        disk_free_ratio = check_disk_space()
+        if disk_free_ratio < DISK_FULL_THRESHOLD:  # Stop the script when disk is almost full
+            logging.error("Disk is almost full. Stopping the script.")
+            break
+        if disk_free_ratio < DISK_SPACE_THRESHOLD:  # Threshold for disk space to start deleting files
+            most_common_category = get_most_common_category(session)
+            if most_common_category:
+                delete_old_recordings(most_common_category)
+        analyze_recordings()
+        time.sleep(60)  # Check every minute
 
 if __name__ == "__main__":
     main()

@@ -3,7 +3,7 @@
 import os
 import struct
 import time
-import configparser
+import toml
 import shutil
 import gpiod
 from smbus2 import SMBus
@@ -14,27 +14,31 @@ import logging
 # Configure logging
 log_dir = '/var/log/biosense/'
 log_file = os.path.join(log_dir, 'ups-monitor.log')
+
+# Set up logging
 log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
 logging.basicConfig(level=logging.INFO, handlers=[log_handler],
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Activate the virtual environment
-venv_path = '/home/biosense/biosense_venv/bin/activate_this.py'
-if os.path.exists(venv_path):
-    with open(venv_path) as file_:
-        exec(file_.read(), {'__file__': venv_path})
-
 def readVoltage(bus, address):
-    read = bus.read_word_data(address, 2)
-    swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-    voltage = swapped * 1.25 / 1000 / 16
-    return voltage
+    try:
+        read = bus.read_word_data(address, 2)
+        swapped = struct.unpack("<H", struct.pack(">H", read))[0]
+        voltage = swapped * 1.25 / 1000 / 16
+        return voltage
+    except Exception as e:
+        logging.error(f"Error reading voltage: {e}")
+        return None
 
 def readCapacity(bus, address):
-    read = bus.read_word_data(address, 4)
-    swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-    capacity = swapped / 256
-    return capacity
+    try:
+        read = bus.read_word_data(address, 4)
+        swapped = struct.unpack("<H", struct.pack(">H", read))[0]
+        capacity = swapped / 256
+        return capacity
+    except Exception as e:
+        logging.error(f"Error reading capacity: {e}")
+        return None
 
 def get_battery_status(voltage):
     if voltage > 3.78:
@@ -60,70 +64,81 @@ def ensure_single_instance(pidfile):
             f.write(pid)
 
 def load_config(config_file):
-    config = configparser.ConfigParser()
     try:
-        config.read(config_file)
-        if not config.sections():
+        config = toml.load(config_file)
+        if not config:
             raise Exception("Configuration file is empty or not found.")
         return config
     except Exception as e:
         logging.error(f"Error reading configuration file: {e}")
-        sys.exit(1)
+        exit(1)
 
 def main():
     config_file = '/etc/biosense/ups-monitor.conf'
     config = load_config(config_file)
+    logging.info("Configuration file loaded")
 
-    shutdown_threshold = int(config['DEFAULT'].get('SHUTDOWN_THRESHOLD', 3))
-    pld_pin = int(config['DEFAULT'].get('PLD_PIN', 6))
-    battery_low_threshold = int(config['DEFAULT'].get('BATTERY_LOW_THRESHOLD', 20))
-    voltage_threshold = float(config['DEFAULT'].get('VOLTAGE_THRESHOLD', 3.20))
-    check_interval = int(config['DEFAULT'].get('CHECK_INTERVAL', 60))
-    shutdown_delay = int(config['DEFAULT'].get('SHUTDOWN_DELAY', 1))
-    bus_number = int(config['DEFAULT'].get('BUS', 1))
-    address = int(config['DEFAULT'].get('ADDRESS', 0x36), 16)
-    loop = config['DEFAULT'].get('LOOP', 'true').lower() == 'true'
+    try:
+        shutdown_threshold = config['DEFAULT'].get('SHUTDOWN_THRESHOLD', 3)
+        pld_pin = config['DEFAULT'].get('PLD_PIN', 6)
+        battery_low_threshold = config['DEFAULT'].get('BATTERY_LOW_THRESHOLD', 20)
+        voltage_threshold = config['DEFAULT'].get('VOLTAGE_THRESHOLD', 3.20)
+        check_interval = config['DEFAULT'].get('CHECK_INTERVAL', 60)
+        shutdown_delay = config['DEFAULT'].get('SHUTDOWN_DELAY', 1)
+        bus_number = config['DEFAULT'].get('BUS', 1)
+        address = int(config['DEFAULT'].get('ADDRESS', "0x36"), 16)
+        loop = config['DEFAULT'].get('LOOP', True)
+    except Exception as e:
+        logging.error(f"Error parsing configuration: {e}")
+        exit(1)
 
     pidfile = "/run/ups-monitor.pid"
     ensure_single_instance(pidfile)
+    logging.info("Single instance ensured")
 
     shutdown_initiated = False
 
     try:
         bus = SMBus(bus_number)
+        logging.info("SMBus initialized")
         chip = gpiod.Chip('gpiochip4')
+        logging.info("GPIO chip accessed")
         pld_line = chip.get_line(pld_pin)
         pld_line.request(consumer="PLD", type=gpiod.LINE_REQ_DIR_IN)
+        logging.info("GPIO line requested")
 
         while True:
             failure_counter = 0
 
             while failure_counter < shutdown_threshold:
-                ac_power_state = pld_line.get_value()
-                voltage = readVoltage(bus, address)
-                battery_status = get_battery_status(voltage)
-                capacity = readCapacity(bus, address)
-                logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), AC Power State: {'Plugged in' if ac_power_state == 1 else 'Unplugged'}, Voltage: {voltage:.2f}V")
+                try:
+                    ac_power_state = pld_line.get_value()
+                    voltage = readVoltage(bus, address)
+                    battery_status = get_battery_status(voltage)
+                    capacity = readCapacity(bus, address)
+                    logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), AC Power State: {'Plugged in' if ac_power_state == 1 else 'Unplugged'}, Voltage: {voltage:.2f}V")
 
-                if ac_power_state == 1:
-                    if shutdown_initiated:
-                        call("sudo shutdown -c", shell=True)
-                        shutdown_initiated = False
-                        logging.info("Shutdown canceled due to AC power restored.")
-                    failure_counter = 0
-                elif capacity < battery_low_threshold:
-                    logging.warning("Battery level critical.")
-                    failure_counter += 1
-                elif voltage < voltage_threshold:
-                    logging.warning("Battery voltage critical.")
-                    failure_counter += 1
-                else:
-                    failure_counter = 0
+                    if ac_power_state == 1:
+                        if shutdown_initiated:
+                            call("sudo shutdown -c", shell=True)
+                            shutdown_initiated = False
+                            logging.info("Shutdown canceled due to AC power restored.")
+                        failure_counter = 0
+                    elif capacity < battery_low_threshold:
+                        logging.warning("Battery level critical.")
+                        failure_counter += 1
+                    elif voltage < voltage_threshold:
+                        logging.warning("Battery voltage critical.")
+                        failure_counter += 1
+                    else:
+                        failure_counter = 0
 
-                if failure_counter < shutdown_threshold:
-                    time.sleep(check_interval)
-                else:
-                    break
+                    if failure_counter < shutdown_threshold:
+                        time.sleep(check_interval)
+                    else:
+                        break
+                except Exception as e:
+                    logging.error(f"Error during monitoring loop: {e}")
 
             if failure_counter >= shutdown_threshold and not shutdown_initiated:
                 shutdown_reason = ""

@@ -4,7 +4,6 @@ After=network.target
 
 [Service]
 WorkingDirectory=/home/biosense/biosense_venv
-ExecStartPre=/bin/bash -c 'ping -c 1 10.123.0.1 || exit 1'
 ExecStart=/home/biosense/biosense_venv/bin/python3 /usr/local/bin/migrate-birdnet-data
 Restart=on-failure
 RestartSec=30
