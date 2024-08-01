@@ -183,8 +183,12 @@ elif [ "$phase" == "post-install" ]; then
         logtoboth "Started migrate-birdnet-data.service"
 
     # Set time zone to UTC for uniformity across clients
-    timedatectl set-timezone UTC &&
-        logtoboth "Set timezone to UTC"
+    {
+        rm -f /etc/localtime &&
+            ln -s /usr/share/zoneinfo/UTC /etc/localtime &&
+            logtoboth "Set timezone to UTC" ||
+            logtoboth "Failed to set timezone to UTC"
+    }
 
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi

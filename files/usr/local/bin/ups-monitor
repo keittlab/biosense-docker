@@ -54,15 +54,6 @@ def get_battery_status(voltage):
     else:
         return "Unknown"
 
-def ensure_single_instance(pidfile):
-    pid = str(os.getpid())
-    if os.path.isfile(pidfile):
-        logging.error("Script already running")
-        exit(1)
-    else:
-        with open(pidfile, 'w') as f:
-            f.write(pid)
-
 def load_config(config_file):
     try:
         config = toml.load(config_file)
@@ -91,10 +82,6 @@ def main():
     except Exception as e:
         logging.error(f"Error parsing configuration: {e}")
         exit(1)
-
-    pidfile = "/run/ups-monitor.pid"
-    ensure_single_instance(pidfile)
-    logging.info("Single instance ensured")
 
     shutdown_initiated = False
 
@@ -156,8 +143,6 @@ def main():
                 break
             time.sleep(check_interval)
     finally:
-        if os.path.isfile(pidfile):
-            os.unlink(pidfile)
         exit(0)
 
 if __name__ == "__main__":
