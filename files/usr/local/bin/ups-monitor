@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 import logging
 
 # Configure logging
-log_dir = '/var/log/biosense/'
+log_dir = '/var/log/'
 log_file = os.path.join(log_dir, 'ups-monitor.log')
 
 # Set up logging

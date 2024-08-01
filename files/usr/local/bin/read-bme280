@@ -7,8 +7,7 @@ import argparse
 from time import sleep, strftime
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, Float, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 import toml
 import board
 from adafruit_bme280 import basic as adafruit_bme280
@@ -36,15 +35,8 @@ class BME280Reading(Base):
     latitude = Column(Float)
     longitude = Column(Float)
 
-def get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password):
-    if db_type == 'postgresql':
-        try:
-            return create_engine(f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}')
-        except Exception as e:
-            logging.error(f"PostgreSQL connection failed: {e}. Falling back to SQLite.")
-            return create_engine(f'sqlite:///{db_path}')
-    else:
-        return create_engine(f'sqlite:///{db_path}')
+def get_engine(db_path):
+    return create_engine(f'sqlite:///{db_path}')
 
 def create_session(engine):
     Session = sessionmaker(bind=engine)
@@ -107,13 +99,7 @@ def main():
     config = load_config(config_file)
 
     interval = config['DEFAULT'].get('INTERVAL', 300)
-    db_type = config['DEFAULT'].get('DB_TYPE', 'sqlite')
     db_path = config['DEFAULT'].get('DB_PATH', '/home/biosense/datastore/sensor_data.db')
-    db_host = config['DEFAULT'].get('DB_HOST', 'localhost')
-    db_port = config['DEFAULT'].get('DB_PORT', 5432)
-    db_name = config['DEFAULT'].get('DB_NAME', 'biosense')
-    db_user = config['DEFAULT'].get('DB_USER', 'biosense')
-    db_password = config['DEFAULT'].get('DB_PASSWORD', 'biosense')
     max_disk_usage = config['DEFAULT'].get('MAX_DISK_USAGE', 90)
     latitude = float(os.getenv('LATITUDE', '0.0'))
     longitude = float(os.getenv('LONGITUDE', '0.0'))
@@ -121,16 +107,15 @@ def main():
     if args.test_mode:
         logging.info("Running in test mode")
         db_path = '/home/biosense/datastore/test_sensor_data.db'
-        db_type = 'sqlite'
 
-    engine = get_engine(db_type, db_path, db_host, db_port, db_name, db_user, db_password)
+    engine = get_engine(db_path)
     session = create_session(engine)
 
     Base.metadata.create_all(engine)
 
     bme280 = initialize_sensor()
 
-    logging.info(f"Recording BME280 readings to {db_type} database every {interval} seconds")
+    logging.info(f"Recording BME280 readings to SQLite database every {interval} seconds")
 
     while True:
         if check_disk_usage(max_disk_usage):
