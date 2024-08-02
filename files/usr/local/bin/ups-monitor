@@ -79,6 +79,12 @@ def main():
         bus_number = config['DEFAULT'].get('BUS', 1)
         address = int(config['DEFAULT'].get('ADDRESS', "0x36"), 16)
         loop = config['DEFAULT'].get('LOOP', True)
+
+        # BirdNET parameters
+        run_birdnet_capacity_resume = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_RESUME', 30)
+        run_birdnet_voltage_resume = config['DEFAULT'].get('BIRDN_VOLTAGE_RESUME', 3.50)
+        run_birdnet_capacity_stop = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_STOP', 15)
+        run_birdnet_voltage_stop = config['DEFAULT'].get('BIRDN_VOLTAGE_STOP', 3.30)
     except Exception as e:
         logging.error(f"Error parsing configuration: {e}")
         exit(1)
@@ -111,14 +117,16 @@ def main():
                             shutdown_initiated = False
                             logging.info("Shutdown canceled due to AC power restored.")
                         failure_counter = 0
-                    elif capacity < battery_low_threshold:
-                        logging.warning("Battery level critical.")
-                        failure_counter += 1
-                    elif voltage < voltage_threshold:
-                        logging.warning("Battery voltage critical.")
-                        failure_counter += 1
+                        # Check conditions to resume BirdNET service
+                        if capacity > run_birdnet_capacity_resume and voltage > run_birdnet_voltage_resume:
+                            call("systemctl start run-birdnet", shell=True)
+                            logging.info("BirdNET service resumed")
                     else:
-                        failure_counter = 0
+                        # Check conditions to stop BirdNET service
+                        if capacity < run_birdnet_capacity_stop or voltage < run_birdnet_voltage_stop:
+                            call("systemctl stop run-birdnet", shell=True)
+                            logging.info("BirdNET service stopped")
+                        failure_counter += 1
 
                     if failure_counter < shutdown_threshold:
                         time.sleep(check_interval)

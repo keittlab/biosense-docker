@@ -49,7 +49,9 @@ EXPORT_DIR = config.get('EXPORT_DIR', '/home/biosense/datastore/sound_analysis_r
 PROCESSED_DIR = config.get('PROCESSED_DIR', '/home/biosense/datastore/processed_recordings/')
 SEGMENT_LENGTH = int(config.get('SEGMENT_LENGTH', 3))
 DB_PATH = config.get('DB_PATH', '/home/biosense/datastore/birdnet_results.db')  # For SQLite
-MIN_CONF = float(config.get('MIN_CONF', 0.25))  # Read min_conf from config
+MIN_CONF = float(config.get('MIN_CONF', 0.1))  # Read min_conf from config
+OVERLAP = float(config.get('OVERLAP', 1.5))  # Read overlap from config
+SENSITIVITY = float(config.get('SENSITIVITY', 1.0))  # Read sensitivity from config
 
 # Get latitude and longitude from environment variables
 LATITUDE = float(os.getenv('LATITUDE', '0.0'))
@@ -135,14 +137,14 @@ def create_partitioned_dir(base_dir, timestamp):
 
 def on_analyze_complete(recording, recording_timestamp):
     logging.info(f"Analyzed: {recording.path}")
-    logging.info(f"Detections: {recording.detections}")
+    logging.debug(f"Detections: {recording.detections}")
     
     # Move the recording after successful analysis
     try:
         processed_dir_partitioned = create_partitioned_dir(PROCESSED_DIR, recording_timestamp)
         destination = os.path.join(processed_dir_partitioned, os.path.basename(recording.path))
         shutil.move(recording.path, destination)
-        logging.info(f"Moved recording to processed directory: {destination}")
+        logging.debug(f"Moved recording to processed directory: {destination}")
         return destination
     except Exception as e:
         logging.error(f"Error moving recording: {recording.path} - {e}")
@@ -167,7 +169,7 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
         
         new_segment_filename = os.path.join(export_dir_partitioned, os.path.basename(old_segment_filename))
         shutil.move(old_segment_filename, new_segment_filename)
-        logging.info(f"Extracted segment: {new_segment_filename}")
+        logging.debug(f"Extracted segment: {new_segment_filename}")
 
         # Save detection to the database
         detection_data = Detection(
@@ -185,10 +187,10 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
             file_path=new_segment_filename,
         )
         try:
-            logging.info(f"Attempting to write detection to database: {detection_data}")
+            logging.debug(f"Attempting to write detection to database: {detection_data}")
             session.add(detection_data)
             session.commit()
-            logging.info("Detection written to database successfully.")
+            logging.debug("Detection written to database successfully.")
         except Exception as e:
             logging.error(f"Error writing to database: {e}")
             session.rollback()
@@ -212,10 +214,12 @@ def analyze_recordings():
             recording_timestamp = get_creation_time(filepath)
             recording = Recording(
                 analyzer, 
-                filepath, 
+                filepath,
                 lat=LATITUDE, 
                 lon=LONGITUDE, 
-                min_conf=MIN_CONF, 
+                overlap=OVERLAP,
+                min_conf=MIN_CONF,
+                sensitivity=SENSITIVITY,
                 date=recording_timestamp,
                 return_all_detections=True
             )
