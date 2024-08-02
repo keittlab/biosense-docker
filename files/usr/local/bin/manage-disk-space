@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+
+import os
+import logging
+from logging.handlers import RotatingFileHandler
+import shutil
+import time
+import random
+import subprocess
+
+# Configure logging
+log_dir = '/var/log/biosense/'
+log_file = os.path.join(log_dir, 'manage-disk-space.log')
+log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
+logging.basicConfig(level=logging.INFO, handlers=[log_handler],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Thresholds for disk usage
+DISK_USAGE_WARNING_THRESHOLD = 85
+DISK_USAGE_CLEANUP_THRESHOLD = 90
+DISK_USAGE_STOP_SERVICES_THRESHOLD = 95
+DISK_USAGE_STOP_CLEANUP_THRESHOLD = 85
+
+# Services to manage
+SERVICES = ['read-bme280', 'record-sound', 'run-birdnet']
+
+def check_disk_usage(path):
+    total, used, free = shutil.disk_usage(path)
+    percent_used = (used / total) * 100
+    logging.info(f"Disk usage for {path}: {percent_used:.2f}% used")
+    return percent_used
+
+def delete_random_file_from_directory(directory):
+    try:
+        files = [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+        if files:
+            file_to_delete = random.choice(files)
+            os.remove(file_to_delete)
+            logging.info(f"Deleted file: {file_to_delete}")
+        else:
+            logging.warning(f"No files found in directory: {directory}")
+    except Exception as e:
+        logging.error(f"Error deleting file: {e}")
+
+def stop_services():
+    for service in SERVICES:
+        try:
+            subprocess.run(['sudo', 'systemctl', 'stop', service], check=True)
+            logging.info(f"Stopped service: {service}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error stopping service {service}: {e}")
+
+def start_services():
+    for service in SERVICES:
+        try:
+            subprocess.run(['sudo', 'systemctl', 'start', service], check=True)
+            logging.info(f"Started service: {service}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error starting service {service}: {e}")
+
+def main():
+    path_to_monitor = '/home/biosense'
+    processed_recordings_dir = '/home/biosense/datastore/processed_recordings'
+    services_stopped = False
+
+    while True:
+        percent_used = check_disk_usage(path_to_monitor)
+        
+        if percent_used > DISK_USAGE_WARNING_THRESHOLD:
+            logging.warning(f"Disk usage for {path_to_monitor} exceeded warning threshold: {percent_used:.2f}% used")
+        
+        if percent_used > DISK_USAGE_STOP_SERVICES_THRESHOLD and not services_stopped:
+            logging.warning(f"Disk usage for {path_to_monitor} exceeded stop services threshold: {percent_used:.2f}% used")
+            stop_services()
+            services_stopped = True
+        
+        if percent_used > DISK_USAGE_CLEANUP_THRESHOLD:
+            logging.warning(f"Disk usage for {path_to_monitor} exceeded cleanup threshold: {percent_used:.2f}% used")
+            while percent_used > DISK_USAGE_STOP_CLEANUP_THRESHOLD:
+                delete_random_file_from_directory(processed_recordings_dir)
+                percent_used = check_disk_usage(path_to_monitor)
+                time.sleep(1)  # Short delay to allow the system to update disk usage
+        
+        if services_stopped and percent_used < DISK_USAGE_STOP_CLEANUP_THRESHOLD:
+            logging.info(f"Disk usage for {path_to_monitor} below start services threshold: {percent_used:.2f}% used")
+            start_services()
+            services_stopped = False
+
+        time.sleep(600)  # Check every 10 minutes
+
+if __name__ == "__main__":
+    main()

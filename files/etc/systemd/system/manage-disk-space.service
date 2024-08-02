@@ -1,0 +1,13 @@
+[Unit]
+Description=Disk Usage Monitoring Service
+RequiresMountsFor=/home/biosense
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/local/bin/manage-disk-space
+Restart=on-failure
+RestartSec=30
+User=biosense
+
+[Install]
+WantedBy=multi-user.target
