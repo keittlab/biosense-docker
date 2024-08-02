@@ -7,6 +7,12 @@ import shutil
 import time
 import random
 import subprocess
+import sqlite3
+import toml
+import sys
+
+# Load configuration
+config = toml.load('/etc/biosense/manage-disk-space.conf')
 
 # Configure logging
 log_dir = '/var/log/biosense/'
@@ -16,13 +22,16 @@ logging.basicConfig(level=logging.INFO, handlers=[log_handler],
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Thresholds for disk usage
-DISK_USAGE_WARNING_THRESHOLD = 85
-DISK_USAGE_CLEANUP_THRESHOLD = 90
-DISK_USAGE_STOP_SERVICES_THRESHOLD = 95
-DISK_USAGE_STOP_CLEANUP_THRESHOLD = 85
+DISK_USAGE_WARNING_THRESHOLD = config['thresholds']['warning']
+DISK_USAGE_CLEANUP_THRESHOLD = config['thresholds']['cleanup']
+DISK_USAGE_STOP_SERVICES_THRESHOLD = config['thresholds']['stop_services']
+DISK_USAGE_STOP_CLEANUP_THRESHOLD = config['thresholds']['stop_cleanup']
 
 # Services to manage
-SERVICES = ['read-bme280', 'record-sound', 'run-birdnet']
+SERVICES = config['services']['list']
+
+# Database path
+DB_PATH = config['database']['path']
 
 def check_disk_usage(path):
     total, used, free = shutil.disk_usage(path)
@@ -30,17 +39,56 @@ def check_disk_usage(path):
     logging.info(f"Disk usage for {path}: {percent_used:.2f}% used")
     return percent_used
 
-def delete_random_file_from_directory(directory):
+def database_exists_and_has_schema(conn):
     try:
-        files = [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-        if files:
-            file_to_delete = random.choice(files)
-            os.remove(file_to_delete)
-            logging.info(f"Deleted file: {file_to_delete}")
-        else:
-            logging.warning(f"No files found in directory: {directory}")
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(birdnet_detections)")
+        columns = cursor.fetchall()
+        return len(columns) > 0
     except Exception as e:
-        logging.error(f"Error deleting file: {e}")
+        logging.error(f"Error checking database schema: {e}")
+        return False
+
+def delete_random_recording_from_db():
+    if not os.path.isfile(DB_PATH):
+        logging.warning(f"Database file not found: {DB_PATH}. Skipping deletion.")
+        return
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        if not database_exists_and_has_schema(conn):
+            logging.warning("Database does not have the expected schema. Skipping deletion.")
+            conn.close()
+            return
+
+        cursor = conn.cursor()
+
+        # Get a random source_recording
+        cursor.execute("SELECT DISTINCT source_recording FROM birdnet_detections WHERE source_recording IS NOT NULL")
+        source_recordings = cursor.fetchall()
+
+        if not source_recordings:
+            logging.warning("No source recordings found in database.")
+            conn.close()
+            return
+
+        source_recording_to_delete = random.choice(source_recordings)[0]
+
+        # Update all entries with the selected source_recording
+        cursor.execute("UPDATE birdnet_detections SET source_recording = NULL WHERE source_recording = ?", (source_recording_to_delete,))
+        conn.commit()
+        logging.debug(f"Updated database: set source_recording to NULL for source_recording: {source_recording_to_delete}")
+
+        # Remove the associated file if it exists
+        if os.path.isfile(source_recording_to_delete):
+            os.remove(source_recording_to_delete)
+            logging.info(f"Deleted source recording file: {source_recording_to_delete}")
+        else:
+            logging.warning(f"Source recording file to delete not found: {source_recording_to_delete}")
+
+        conn.close()
+    except Exception as e:
+        logging.error(f"Error handling database and file deletion: {e}")
 
 def stop_services():
     for service in SERVICES:
@@ -60,33 +108,43 @@ def start_services():
 
 def main():
     path_to_monitor = '/home/biosense'
-    processed_recordings_dir = '/home/biosense/datastore/processed_recordings'
     services_stopped = False
 
-    while True:
-        percent_used = check_disk_usage(path_to_monitor)
-        
-        if percent_used > DISK_USAGE_WARNING_THRESHOLD:
-            logging.warning(f"Disk usage for {path_to_monitor} exceeded warning threshold: {percent_used:.2f}% used")
-        
-        if percent_used > DISK_USAGE_STOP_SERVICES_THRESHOLD and not services_stopped:
-            logging.warning(f"Disk usage for {path_to_monitor} exceeded stop services threshold: {percent_used:.2f}% used")
-            stop_services()
-            services_stopped = True
-        
-        if percent_used > DISK_USAGE_CLEANUP_THRESHOLD:
-            logging.warning(f"Disk usage for {path_to_monitor} exceeded cleanup threshold: {percent_used:.2f}% used")
-            while percent_used > DISK_USAGE_STOP_CLEANUP_THRESHOLD:
-                delete_random_file_from_directory(processed_recordings_dir)
-                percent_used = check_disk_usage(path_to_monitor)
-                time.sleep(1)  # Short delay to allow the system to update disk usage
-        
-        if services_stopped and percent_used < DISK_USAGE_STOP_CLEANUP_THRESHOLD:
-            logging.info(f"Disk usage for {path_to_monitor} below start services threshold: {percent_used:.2f}% used")
-            start_services()
-            services_stopped = False
+    # Log when the script starts
+    logging.info("Script started.")
 
-        time.sleep(600)  # Check every 10 minutes
+    try:
+        while True:
+            percent_used = check_disk_usage(path_to_monitor)
+            
+            if percent_used > DISK_USAGE_WARNING_THRESHOLD:
+                logging.warning(f"Disk usage for {path_to_monitor} exceeded warning threshold: {percent_used:.2f}% used")
+            
+            if percent_used > DISK_USAGE_STOP_SERVICES_THRESHOLD and not services_stopped:
+                logging.warning(f"Disk usage for {path_to_monitor} exceeded stop services threshold: {percent_used:.2f}% used")
+                stop_services()
+                services_stopped = True
+            
+            if percent_used > DISK_USAGE_CLEANUP_THRESHOLD:
+                logging.warning(f"Disk usage for {path_to_monitor} exceeded cleanup threshold: {percent_used:.2f}% used")
+                delete_random_recording_from_db()
+                while percent_used > DISK_USAGE_STOP_CLEANUP_THRESHOLD:
+                    percent_used = check_disk_usage(path_to_monitor)
+                    time.sleep(1)  # Short delay to allow the system to update disk usage
+            
+            if services_stopped and percent_used < DISK_USAGE_STOP_CLEANUP_THRESHOLD:
+                logging.info(f"Disk usage for {path_to_monitor} below start services threshold: {percent_used:.2f}% used")
+                start_services()
+                services_stopped = False
+
+            time.sleep(600)  # Check every 10 minutes
+
+    except KeyboardInterrupt:
+        logging.info("Script interrupted and stopped.")
+    except Exception as e:
+        logging.error(f"Script encountered an error: {e}")
+    finally:
+        logging.info("Script stopped.")
 
 if __name__ == "__main__":
     main()
