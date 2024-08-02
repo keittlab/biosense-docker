@@ -9,6 +9,7 @@ import logging
 import time
 from logging.handlers import RotatingFileHandler
 from subprocess import Popen, PIPE
+from datetime import datetime
 
 # Configure logging
 log_dir = '/var/log/biosense/'
@@ -40,20 +41,15 @@ config_file = '/etc/biosense/record-sound.conf'
 config = read_config(config_file)
 
 RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sound_recordings/')
-MAX_DISK_USAGE_PERCENT = int(config.get('MAX_DISK_USAGE_PERCENT', 90))  # Percentage
 RECORDING_DURATION_MINUTES = int(config.get('RECORDING_DURATION_MINUTES', 15))  # Minutes
 CHANNELS = int(config.get('CHANNELS', 1))  # 1 for mono, 2 for stereo
 SLEEP_INTERVAL_SECONDS = int(config.get('SLEEP_INTERVAL_SECONDS', 5))  # Sleep interval in seconds
 
-def check_disk_usage(directory):
-    total, used, free = shutil.disk_usage(directory)
-    return used / total * 100
+def get_hostname():
+    hostname = os.uname().nodename
+    return hostname.replace('-', '_')
 
 def start_recording():
-    if check_disk_usage(RECORDING_DIR) > MAX_DISK_USAGE_PERCENT:
-        logging.warning("Insufficient disk space. Aborting recording.")
-        sys.exit(1)
-    
     try:
         latitude = float(os.getenv('LATITUDE', '0'))
         longitude = float(os.getenv('LONGITUDE', '0'))
@@ -70,10 +66,12 @@ def start_recording():
     lon_str = f"{longitude:.6f}".replace('.', '_')
     formatted_lat_lon = f"{lat_str}{lat_direction}_{lon_str}{lon_direction}"
 
-    file_pattern = os.path.join(RECORDING_DIR, f'recording_{formatted_lat_lon}_%Y%m%d_%H%M%S.wav')
+    hostname = get_hostname()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_pattern = os.path.join(RECORDING_DIR, f'arecord_{hostname}_{formatted_lat_lon}_{timestamp}.wav')
     arecord_command = [
         "arecord", "-f", "S16_LE", f"-c{CHANNELS}", "-r48000", "-t", "wav",
-        "--max-file-time", str(RECORDING_DURATION_MINUTES * 60), "--use-strftime", file_pattern  # Convert minutes to seconds
+        "--max-file-time", str(RECORDING_DURATION_MINUTES * 60), file_pattern  # Convert minutes to seconds
     ]
     logging.info(f"Starting recording with command: {' '.join(arecord_command)}")
     process = Popen(arecord_command, stdout=PIPE, stderr=PIPE)
@@ -88,13 +86,6 @@ def start_recording():
     signal.signal(signal.SIGINT, signal_handler)
 
     while process.poll() is None:
-        if check_disk_usage(RECORDING_DIR) > MAX_DISK_USAGE_PERCENT:
-            logging.warning("Disk usage high. Stopping recording.")
-            process.terminate()
-            process.wait()
-            logging.info("Recording process terminated due to high disk usage.")
-            sys.exit(0)
-
         time.sleep(SLEEP_INTERVAL_SECONDS)
 
 def main():

@@ -3,16 +3,16 @@
 import os
 import sys
 import shutil
-import argparse
 from time import sleep, strftime
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, String, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 import toml
 import board
 from adafruit_bme280 import basic as adafruit_bme280
 import logging
 from logging.handlers import RotatingFileHandler
+import signal
 
 # Configure logging
 log_dir = '/var/log/biosense/'
@@ -28,12 +28,13 @@ Base = declarative_base()
 class BME280Reading(Base):
     __tablename__ = 'bme280_readings'
     id = Column(Integer, primary_key=True, autoincrement=True)
+    hostname = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
     temperature = Column(Float)
     humidity = Column(Float)
     pressure = Column(Float)
-    latitude = Column(Float)
-    longitude = Column(Float)
 
 def get_engine(db_path):
     return create_engine(f'sqlite:///{db_path}')
@@ -86,31 +87,43 @@ def load_config(config_file):
         logging.error(f"Error reading configuration file: {e}")
         sys.exit(1)
 
-def check_disk_usage(max_usage):
-    total, used, free = shutil.disk_usage("/")
-    return used / total * 100 > max_usage
+def validate_database(engine, expected_columns):
+    inspector = inspect(engine)
+    if 'bme280_readings' in inspector.get_table_names():
+        columns = inspector.get_columns('bme280_readings')
+        column_names = {column['name'] for column in columns}
+        if column_names == expected_columns:
+            return True
+    return False
+
+def handle_signal(signum, frame):
+    logging.info(f"Received signal {signum}, performing cleanup")
+    sys.exit(0)
 
 def main():
-    parser = argparse.ArgumentParser(description="BME280 Sensor Data Recording")
-    parser.add_argument('--test-mode', action='store_true', help="Run in test mode")
-    args = parser.parse_args()
+    signal.signal(signal.SIGINT, handle_signal)  # Handle Ctrl+C
+    signal.signal(signal.SIGTERM, handle_signal)  # Handle termination signal
 
     config_file = '/etc/biosense/read-bme280.conf'
     config = load_config(config_file)
 
     interval = config['DEFAULT'].get('INTERVAL', 300)
     db_path = config['DEFAULT'].get('DB_PATH', '/home/biosense/datastore/sensor_data.db')
-    max_disk_usage = config['DEFAULT'].get('MAX_DISK_USAGE', 90)
     latitude = float(os.getenv('LATITUDE', '0.0'))
     longitude = float(os.getenv('LONGITUDE', '0.0'))
+    hostname = os.uname().nodename.replace('-', '_')
 
-    if args.test_mode:
-        logging.info("Running in test mode")
-        db_path = '/home/biosense/datastore/test_sensor_data.db'
+    expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'temperature', 'humidity', 'pressure'}
 
     engine = get_engine(db_path)
-    session = create_session(engine)
+    
+    if not validate_database(engine, expected_columns):
+        backup_db_path = f"{db_path}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        logging.warning(f"Database schema does not match. Moving existing database to {backup_db_path}")
+        shutil.move(db_path, backup_db_path)
+        engine = get_engine(db_path)
 
+    session = create_session(engine)
     Base.metadata.create_all(engine)
 
     bme280 = initialize_sensor()
@@ -118,21 +131,19 @@ def main():
     logging.info(f"Recording BME280 readings to SQLite database every {interval} seconds")
 
     while True:
-        if check_disk_usage(max_disk_usage):
-            logging.error(f"Disk usage is above {max_disk_usage}%. Stopping recording.")
-            sys.exit(1)
-
         data = get_sensor_data(bme280)
         new_reading = BME280Reading(
+            hostname=hostname,
+            latitude=latitude,
+            longitude=longitude,
+            timestamp=datetime.utcnow(),
             temperature=data['temp'],
             humidity=data['hum'],
-            pressure=data['pres'],
-            latitude=latitude,
-            longitude=longitude
+            pressure=data['pres']
         )
         session.add(new_reading)
         session.commit()
-        logging.info(f"Date: {strftime('%Y-%m-%d')}, Time: {strftime('%H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}, Lat: {latitude}, Lon: {longitude}")
+        logging.info(f"Hostname: {hostname}, Lat: {latitude}, Lon: {longitude}, Timestamp: {strftime('%Y-%m-%d %H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}")
         sleep(interval)  # Sleep for the specified interval
 
 if __name__ == "__main__":

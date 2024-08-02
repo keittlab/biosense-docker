@@ -309,6 +309,9 @@ if [[ ${WAIT_TIMESYNC} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --nowait-timesync"
 fi
 
+# Add hostname to the sdm command
+SDM_COMMAND="${SDM_COMMAND} --hostname ${HOSTNAME}"
+
 SDM_COMMAND="${SDM_COMMAND} \
     --chroot \
     /home/agent/hostdir/${CUSTOMIZED_IMAGE_FILE}"

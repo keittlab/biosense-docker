@@ -4,6 +4,7 @@ RequiresMountsFor=/home/biosense/datastore/sound_recordings
 After=local-fs.target
 
 [Service]
+EnvironmentFile=/etc/profile.d/geolocation.sh
 WorkingDirectory=/home/biosense/biosense_venv
 ExecStart=/home/biosense/biosense_venv/bin/python3 /usr/local/bin/run-birdnet
 Restart=on-failure
