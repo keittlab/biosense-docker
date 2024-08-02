@@ -5,7 +5,7 @@ import time
 import signal
 import sys
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Index, inspect
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Index, Boolean, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import toml
@@ -13,8 +13,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from birdnetlib import Recording
 from birdnetlib.analyzer import Analyzer
-from pprint import pprint
-from uuid import uuid4
 import shutil
 
 # Configure logging
@@ -51,6 +49,7 @@ EXPORT_DIR = config.get('EXPORT_DIR', '/home/biosense/datastore/sound_analysis_r
 PROCESSED_DIR = config.get('PROCESSED_DIR', '/home/biosense/datastore/processed_recordings/')
 SEGMENT_LENGTH = int(config.get('SEGMENT_LENGTH', 3))
 DB_PATH = config.get('DB_PATH', '/home/biosense/datastore/birdnet_results.db')  # For SQLite
+MIN_CONF = float(config.get('MIN_CONF', 0.25))  # Read min_conf from config
 
 # Get latitude and longitude from environment variables
 LATITUDE = float(os.getenv('LATITUDE', '0.0'))
@@ -72,8 +71,10 @@ class Detection(Base):
     sci_name = Column(String, nullable=False)
     com_name = Column(String, nullable=False)
     confidence = Column(Float)
+    is_likely = Column(Boolean, nullable=True) 
     source_recording = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
+     
 
 Index('idx_sci_name', Detection.sci_name)
 
@@ -111,7 +112,7 @@ def initialize_database(db_path, expected_columns):
     return create_session(engine)
 
 # Expected columns in the database, maintaining order
-expected_columns = ['id', 'hostname', 'latitude', 'longitude', 'timestamp', 'start_time', 'end_time', 'sci_name', 'com_name', 'confidence', 'source_recording', 'file_path']
+expected_columns = ['id', 'hostname', 'latitude', 'longitude', 'timestamp', 'start_time', 'end_time', 'sci_name', 'com_name', 'confidence', 'is_likely', 'source_recording', 'file_path']
 
 # Initialize database
 session = initialize_database(DB_PATH, expected_columns)
@@ -134,7 +135,7 @@ def create_partitioned_dir(base_dir, timestamp):
 
 def on_analyze_complete(recording, recording_timestamp):
     logging.info(f"Analyzed: {recording.path}")
-    pprint(recording.detections)
+    logging.info(f"Detections: {recording.detections}")
     
     # Move the recording after successful analysis
     try:
@@ -160,12 +161,11 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
 
     for detection in recording.detections:
         old_segment_filename = detection['extracted_audio_path']
-        new_segment_filename = os.path.join(export_dir_partitioned, f"detection_{uuid4()}.flac")
-        
-        if not os.path.exists(old_segment_filename):
-            logging.error(f"Extracted file not found: {old_segment_filename}")
+        if not old_segment_filename or not os.path.exists(old_segment_filename):
+            logging.error(f"Extracted file not found or is None: {old_segment_filename}")
             continue
         
+        new_segment_filename = os.path.join(export_dir_partitioned, os.path.basename(old_segment_filename))
         shutil.move(old_segment_filename, new_segment_filename)
         logging.info(f"Extracted segment: {new_segment_filename}")
 
@@ -180,8 +180,9 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
             sci_name=detection['scientific_name'],
             com_name=detection['common_name'],
             confidence=detection['confidence'],
+            is_likely=detection['is_predicted_for_location_and_date'],
             source_recording=source_recording_path,
-            file_path=new_segment_filename
+            file_path=new_segment_filename,
         )
         try:
             logging.info(f"Attempting to write detection to database: {detection_data}")
@@ -209,7 +210,15 @@ def analyze_recordings():
             filepath = os.path.join(RECORDING_DIR, filename)
             logging.info(f"Processing file: {filepath}")
             recording_timestamp = get_creation_time(filepath)
-            recording = Recording(analyzer, filepath, lat=LATITUDE, lon=LONGITUDE)
+            recording = Recording(
+                analyzer, 
+                filepath, 
+                lat=LATITUDE, 
+                lon=LONGITUDE, 
+                min_conf=MIN_CONF, 
+                date=recording_timestamp,
+                return_all_detections=True
+            )
             try:
                 recording.analyze()
                 new_source_recording_path = on_analyze_complete(recording, recording_timestamp)
