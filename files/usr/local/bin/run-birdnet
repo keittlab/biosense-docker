@@ -67,11 +67,11 @@ class Detection(Base):
     latitude = Column(Float)
     longitude = Column(Float)
     timestamp = Column(DateTime)  # Timestamp of the recording
+    start_time = Column(Float)
+    end_time = Column(Float)
     sci_name = Column(String, nullable=False)
     com_name = Column(String, nullable=False)
     confidence = Column(Float)
-    start_time = Column(Float)
-    end_time = Column(Float)
     source_recording = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
 
@@ -82,26 +82,39 @@ def create_session(engine):
     return Session()
 
 def validate_database(engine, expected_columns):
-    inspector = inspect(engine)
-    if 'birdnet_detections' in inspector.get_table_names():
-        columns = inspector.get_columns('birdnet_detections')
-        column_names = {column['name'] for column in columns}
-        if column_names == expected_columns:
-            return True
-    return False
+    try:
+        inspector = inspect(engine)
+        if 'birdnet_detections' in inspector.get_table_names():
+            columns = inspector.get_columns('birdnet_detections')
+            column_names = [column['name'] for column in columns]
+            if column_names == expected_columns:
+                logging.info("Database schema is valid.")
+                return True
+            else:
+                logging.warning(f"Database schema mismatch. Expected columns: {expected_columns}, Found columns: {column_names}")
+        else:
+            logging.warning("Table 'birdnet_detections' does not exist.")
+        return False
+    except Exception as e:
+        logging.error(f"Error inspecting database schema: {e}")
+        return False
 
-# Create SQLite engine and session
-engine = create_engine(f'sqlite:///{DB_PATH}')
-expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'sci_name', 'com_name', 'confidence', 'start_time', 'end_time', 'source_recording', 'file_path'}
+def initialize_database(db_path, expected_columns):
+    engine = create_engine(f'sqlite:///{db_path}')
+    if os.path.exists(db_path):
+        if not validate_database(engine, expected_columns):
+            backup_db_path = f"{db_path}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            logging.warning(f"Database schema does not match. Moving existing database to {backup_db_path}")
+            shutil.move(db_path, backup_db_path)
+            engine = create_engine(f'sqlite:///{db_path}')
+    Base.metadata.create_all(engine)
+    return create_session(engine)
 
-if not validate_database(engine, expected_columns):
-    backup_db_path = f"{DB_PATH}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    logging.warning(f"Database schema does not match. Moving existing database to {backup_db_path}")
-    shutil.move(DB_PATH, backup_db_path)
-    engine = create_engine(f'sqlite:///{DB_PATH}')
+# Expected columns in the database, maintaining order
+expected_columns = ['id', 'hostname', 'latitude', 'longitude', 'timestamp', 'start_time', 'end_time', 'sci_name', 'com_name', 'confidence', 'source_recording', 'file_path']
 
-session = create_session(engine)
-Base.metadata.create_all(engine)
+# Initialize database
+session = initialize_database(DB_PATH, expected_columns)
 
 def get_creation_time(filepath):
     try:
@@ -151,11 +164,11 @@ def extract_detected_segments(recording, export_dir, segment_length, recording_t
             latitude=LATITUDE,
             longitude=LONGITUDE,
             timestamp=recording_timestamp,
+            start_time=detection['start_time'],
+            end_time=detection['end_time'],
             sci_name=detection['scientific_name'],
             com_name=detection['common_name'],
             confidence=detection['confidence'],
-            start_time=detection['start_time'],
-            end_time=detection['end_time'],
             source_recording=source_recording_path,
             file_path=new_segment_filename
         )
@@ -174,14 +187,14 @@ def analyze_recordings():
     while True:
         logging.info("Starting to analyze recordings.")
         files = sorted(os.listdir(RECORDING_DIR), key=lambda x: os.path.getctime(os.path.join(RECORDING_DIR, x)))
-        wav_files = [f for f in files if f.endswith(".wav")]
+        flac_files = [f for f in files if f.endswith(".flac")]
         
-        if len(wav_files) < 2:
+        if len(flac_files) < 2:
             logging.info("Less than two recording files found, waiting for 15 minutes.")
             time.sleep(900)
             continue
 
-        for filename in wav_files[:-1]:  # Exclude the newest file
+        for filename in flac_files[:-1]:  # Exclude the newest file
             filepath = os.path.join(RECORDING_DIR, filename)
             logging.info(f"Processing file: {filepath}")
             recording_timestamp = get_creation_time(filepath)

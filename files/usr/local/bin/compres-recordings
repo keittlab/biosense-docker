@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+
+import os
+import time
+import logging
+from logging.handlers import RotatingFileHandler
+import subprocess
+from datetime import datetime
+
+# Configure logging
+log_dir = '/var/log/biosense/'
+log_file = os.path.join(log_dir, 'compress-wav-to-flac.log')
+log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
+logging.basicConfig(level=logging.INFO, handlers=[log_handler],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+RECORDING_DIR = '/home/biosense/datastore/sound_recordings'
+
+def convert_to_flac(wav_file, flac_file):
+    try:
+        subprocess.run(['ffmpeg', '-i', wav_file, flac_file], check=True)
+        logging.info(f"Converted {wav_file} to {flac_file}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error converting {wav_file} to FLAC: {e}")
+
+def scan_and_convert():
+    while True:
+        logging.info("Scanning for .wav files to convert to .flac")
+        files = sorted(os.listdir(RECORDING_DIR), key=lambda x: os.path.getctime(os.path.join(RECORDING_DIR, x)))
+        wav_files = [f for f in files if f.endswith(".wav")]
+
+        if len(wav_files) < 2:
+            logging.info("Less than two recording files found, waiting for 15 minutes.")
+            time.sleep(900)
+            continue
+
+        for filename in wav_files[:-1]:  # Exclude the newest file
+            filepath = os.path.join(RECORDING_DIR, filename)
+            flac_file = filepath.replace(".wav", ".flac")
+            logging.info(f"Processing file: {filepath}")
+            convert_to_flac(filepath, flac_file)
+
+            # Optionally, delete the original .wav file after conversion
+            try:
+                os.remove(filepath)
+                logging.info(f"Deleted original .wav file: {filepath}")
+            except Exception as e:
+                logging.error(f"Error deleting .wav file {filepath}: {e}")
+        time.sleep(60)  # Check every minute
+
+def main():
+    logging.info("Starting the WAV to FLAC compression service")
+    scan_and_convert()
+
+if __name__ == "__main__":
+    main()
