@@ -105,17 +105,17 @@ def main():
 
             while failure_counter < shutdown_threshold:
                 try:
-                    ac_power_state = pld_line.get_value()
+                    external_power_state = pld_line.get_value()
                     voltage = readVoltage(bus, address)
                     battery_status = get_battery_status(voltage)
                     capacity = readCapacity(bus, address)
-                    logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), AC Power State: {'Plugged in' if ac_power_state == 1 else 'Unplugged'}, Voltage: {voltage:.2f}V")
+                    logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), External Power State: {'Connected' if external_power_state == 1 else 'Disconnected'}, Voltage: {voltage:.2f}V")
 
-                    if ac_power_state == 1:
+                    if external_power_state == 1:
                         if shutdown_initiated:
                             call("sudo shutdown -c", shell=True)
                             shutdown_initiated = False
-                            logging.info("Shutdown canceled due to AC power restored.")
+                            logging.info("Shutdown canceled due to external power restored.")
                         failure_counter = 0
                         # Check conditions to resume BirdNET service
                         if capacity > run_birdnet_capacity_resume and voltage > run_birdnet_voltage_resume:
