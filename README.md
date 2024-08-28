@@ -9,7 +9,7 @@ Here is an example:
 ./customize-image --wg-ip 10.123.1.42 
 ```
 
-The downloads the most recent RPi OS image in to `source_images`, copies the image into `customized_images` and modifies it, and then creates a burn files in `ready_for_imaging`. The file in `ready_for_imaging` can be burned to an sd or ssd drive using the RPi OS Imager application.
+The downloads the most recent RPi OS image in to `source_images`, copies the image into `customized_images` and modifies it. The file in `customized_images` can be burned to an sd or ssd drive using the RPi OS Imager application.
 
 The current username and password are `biosense` and `biosense`. I plan to change this so that users will need to use an authentication app to login. The device will be able to communicate with the server, but only the server can ssh to the device, so we will need to run scripts on the server to retrieve any results.
 
