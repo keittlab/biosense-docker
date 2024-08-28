@@ -11,10 +11,6 @@ Here is an example:
 
 The downloads the most recent RPi OS image in to `source_images`, copies the image into `customized_images` and modifies it. The file in `customized_images` can be burned to an sd or ssd drive using the RPi OS Imager application.
 
-The current username and password are `biosense` and `biosense`. I plan to change this so that users will need to use an authentication app to login. The device will be able to communicate with the server, but only the server can ssh to the device, so we will need to run scripts on the server to retrieve any results.
-
-The `--aptcache` option will speed up the installation and updating of raspberry pi os packages. You have to point it to a machine running `apt-cacher-ng`.
-
 Currently, you need to:
 
 1. Place the biosense users public key into `files/home/biosense/.ssh/authorized_keys`
