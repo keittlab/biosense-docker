@@ -108,7 +108,7 @@ elif [ "$phase" == "1" ]; then
         sed -i "s|Address = .*|Address = ${wg_ip}/16|" "/etc/wireguard/${WG_INTERFACE}.conf"
 
         # Generate the command to append to the server configuration
-        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} persistent-keepalive 900 allowed-ips ${wg_ip}/32 "
+        plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} persistent-keepalive 25 allowed-ips ${wg_ip}/32 "
     else
         logtoboth "template.conf not found in /etc/wireguard, skipping client configuration update"
     fi

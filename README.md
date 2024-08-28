@@ -6,8 +6,7 @@ Here is an example:
 
 ```bash
 ./download-image 
-./init-biosense-image
-./finalize-biosense-image --wg-ip 10.123.1.42 
+./customize-image --wg-ip 10.123.1.42 
 ```
 
 The downloads the most recent RPi OS image in to `source_images`, copies the image into `customized_images` and modifies it, and then creates a burn files in `ready_for_imaging`. The file in `ready_for_imaging` can be burned to an sd or ssd drive using the RPi OS Imager application.
@@ -38,7 +37,7 @@ AllowedIPs = 10.123.0.0/16
 PersistentKeepalive = 900
 ```
 
-The `PrivateKey` and `Address` fields will be filled out as part of the customization process. The script will print out a command to make the new device able to connect to the server over wireguard. You must email that command to me so I can run it on geo. Each time `finalize-biosense-image` is run, it will generate a new wireguard key-pair regardless of the wg-ip setting, so you have to update the server. You do not want to reuse the same wg-ip for multiple devices. The list of used ip's can be retrieved from the server's wireguard configuration, so ask me where to start adding wireguard ip numbers. 
+The `PrivateKey` and `Address` fields will be filled out as part of the customization process. The script will print out a command to make the new device able to connect to the server over wireguard. You must email that command to me so I can run it on geo. Each time `customize-image` is run, it will generate a new wireguard key-pair regardless of the wg-ip setting, so you have to update the server. You do not want to reuse the same wg-ip for multiple devices. The list of used ip's can be retrieved from the server's wireguard configuration, so ask me where to start adding wireguard ip numbers. 
 
 The device will have a user `biosense` who holds the ssh public key for `biosense` on the server. That allows the server to ssh to the device without a password. For now, the device cannot ssh to the server as the public key is not uploaded. We might change that in the future or enable a restricted shell on the server so the device can upload only.
 
