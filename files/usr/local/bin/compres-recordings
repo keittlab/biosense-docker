@@ -9,7 +9,7 @@ from datetime import datetime
 
 # Configure logging
 log_dir = '/var/log/biosense/'
-log_file = os.path.join(log_dir, 'compress-wav-to-flac.log')
+log_file = os.path.join(log_dir, 'compress-recordings.log')
 log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
 logging.basicConfig(level=logging.INFO, handlers=[log_handler],
                     format='%(asctime)s - %(levelname)s - %(message)s')
