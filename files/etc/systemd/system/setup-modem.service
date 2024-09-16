@@ -1,0 +1,12 @@
+[Unit]
+Description=Modem Setup Service
+After=ModemManager.service NetworkManager.service
+Requires=ModemManager.service NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/setup-modem
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

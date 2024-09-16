@@ -19,6 +19,7 @@ CONFIG_FILE=""
 SAVE_CONFIG_FILE=""
 UPDATE_CONFIG=0
 WAIT_TIMESYNC=0
+APN="" # Default APN is empty
 
 # Function to display usage information
 usage() {
@@ -43,45 +44,8 @@ usage() {
     echo "  --latitude <latitude>          : Specify the latitude."
     echo "  --longitude <longitude>        : Specify the longitude."
     echo "  --wait-timesync                : Wait for time synchronization."
+    echo "  --apn <apn>                    : Specify the APN for the cellular network (default: empty)."
     exit 1
-}
-
-# Function to trim whitespace from a variable
-trim() {
-    echo "$1" | awk '{$1=$1};1'
-}
-
-# Function to read YAML configuration using yq and trim the output
-read_yaml() {
-    local yaml_file=$1
-    local key=$2
-    local value=$(yq eval ".$key" "$yaml_file")
-    echo $(trim "$value")
-}
-
-# Function to save current settings to a YAML file
-save_yaml() {
-    local yaml_file=$1
-    {
-        echo "wg_ip: \"${WG_IP}\""
-        echo "source_dir: \"${IMAGE_SOURCE_DIR}\""
-        echo "dest_dir: \"${IMAGE_DEST_DIR}\""
-        echo "image_file: \"${IMAGE_FILE}\""
-        echo "wifi_country: \"${WIFI_COUNTRY}\""
-        echo "latitude: \"${LATITUDE}\""
-        echo "longitude: \"${LONGITUDE}\""
-        echo "wait_timesync: ${WAIT_TIMESYNC}"
-    } >"$yaml_file"
-}
-
-# Function to find the latest image file in the source directory
-find_latest_image() {
-    local latest_image=$(ls -t ${IMAGE_SOURCE_DIR}/*.img 2>/dev/null | head -n 1)
-    if [[ -z "$latest_image" ]]; then
-        echo "No image files found in the source directory."
-        exit 1
-    fi
-    echo $(basename "$latest_image")
 }
 
 # Parse command line arguments
@@ -163,45 +127,16 @@ while [[ "$#" -gt 0 ]]; do
         WAIT_TIMESYNC=1
         shift 1
         ;;
+    --apn) # New argument for APN
+        APN=$2
+        shift 2
+        ;;
     *)
         echo "Invalid option: $1" 1>&2
         usage
         ;;
     esac
 done
-
-# If config file is specified, check for yq and the existence of the file only if needed
-if [[ -n "$CONFIG_FILE" ]]; then
-    if ! command -v yq &>/dev/null; then
-        echo "Error: yq is not installed. Please install yq to use the --config-file option."
-        exit 1
-    fi
-
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo "Error: Specified config file does not exist."
-        exit 1
-    fi
-
-    # Read values from the config file
-    CONFIG_WG_IP=$(read_yaml "$CONFIG_FILE" "wg_ip")
-    CONFIG_WIFI_COUNTRY=$(read_yaml "$CONFIG_FILE" "wifi_country")
-    CONFIG_IMAGE_SOURCE_DIR=$(read_yaml "$CONFIG_FILE" "source_dir")
-    CONFIG_IMAGE_DEST_DIR=$(read_yaml "$CONFIG_FILE" "dest_dir")
-    CONFIG_IMAGE_FILE=$(read_yaml "$CONFIG_FILE" "image_file")
-    CONFIG_LATITUDE=$(read_yaml "$CONFIG_FILE" "latitude")
-    CONFIG_LONGITUDE=$(read_yaml "$CONFIG_FILE" "longitude")
-    CONFIG_WAIT_TIMESYNC=$(read_yaml "$CONFIG_FILE" "wait_timesync")
-
-    # Apply config file values
-    IMAGE_SOURCE_DIR="${IMAGE_SOURCE_DIR:-$CONFIG_IMAGE_SOURCE_DIR}"
-    IMAGE_DEST_DIR="${IMAGE_DEST_DIR:-$CONFIG_IMAGE_DEST_DIR}"
-    IMAGE_FILE="${IMAGE_FILE:-$CONFIG_IMAGE_FILE}"
-    WIFI_COUNTRY="${CONFIG_WIFI_COUNTRY:-$WIFI_COUNTRY}"
-    WG_IP="${WG_IP:-$CONFIG_WG_IP}"
-    LATITUDE="${LATITUDE:-$CONFIG_LATITUDE}"
-    LONGITUDE="${LONGITUDE:-$CONFIG_LONGITUDE}"
-    WAIT_TIMESYNC="${WAIT_TIMESYNC:-$CONFIG_WAIT_TIMESYNC}"
-fi
 
 # Validate input parameters
 if [[ -z "${WG_IP}" ]]; then
@@ -286,6 +221,8 @@ DISABLES="piwiz|${DISABLES}"
 PLUGIN_ARGS="wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}"
 [ -n "${WIFI_SSID}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifissid=${WIFI_SSID}"
 [ -n "${WIFI_PASSWORD}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifipassword=${WIFI_PASSWORD}"
+[ -n "${APN}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|apn=${APN}" # Add APN if provided
+
 if [[ -n "${PLUGIN_ARGS}" ]]; then
     PLUGIN_ARGS="${PLUGIN_ARGS%|}" # Remove trailing '|'
     SDM_COMMAND="${SDM_COMMAND} --plugin @/home/agent/hostdir/sdm-plugin-commands --plugin /home/agent/hostdir/customize-image-plugin:\"${PLUGIN_ARGS}\""

@@ -43,16 +43,36 @@ copy_and_set_ownership() {
     fi
 }
 
+# Function to update APN in /etc/biosense/setup-modem.conf
+update_apn_config() {
+    local apn_value="$1"
+    local config_file="$2"
+
+    # Check if the file exists
+    if [ -f "$config_file" ]; then
+        if [ -n "$apn_value" ]; then
+            # Update the APN line in the file if APN is provided
+            sed -i "s/^apn=.*/apn=$apn_value/" "$config_file"
+            logtoboth "Updated APN value to '$apn_value' in $config_file"
+        else
+            logtoboth "APN not provided, keeping existing value in $config_file"
+        fi
+    else
+        logtoboth "Config file $config_file does not exist."
+    fi
+}
+
 # Get the phase (0, 1, or post-install) and arguments
 phase=$1
 pfx="$(basename "$0")"
 args="$2"
-vldargs="|wg_ip|latitude|longitude|edit_sshd_config|wifissid|wifipassword|"
+vldargs="|wg_ip|latitude|longitude|edit_sshd_config|apn|"
 reqargs="|wg_ip|latitude|longitude|"
 loadparams
 
 # Set the WireGuard interface name
 WG_INTERFACE="biosense"
+APN_CONFIG_FILE="/etc/biosense/setup-modem.conf"
 
 # Extract arguments
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
@@ -70,7 +90,7 @@ if [ "$phase" == "0" ]; then
     mkdir -p $assetdir
 
     # Log the values for debugging
-    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, edit_sshd_config=${edit_sshd_config}, wifissid=${wifissid}, wifipassword=${wifipassword}"
+    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, apn=${apn}, edit_sshd_config=${edit_sshd_config}"
 
     # Biosense is not defined and 1000 *should* be the first user
     copy_and_set_ownership /home/agent/hostdir/files/home/biosense $SDMPT/home/biosense 1000 1000
@@ -119,6 +139,9 @@ elif [ "$phase" == "1" ]; then
     raspi-config nonint do_configure_keyboard 'Generic 104-key PC' &&
         logtoboth "Set keymap to Generic 104-key PC"
 
+    # Update the APN in the setup-modem.conf file
+    update_apn_config "$apn" "$APN_CONFIG_FILE"
+
     # Create a virtual environment and install packages from requirements.txt
     sudo -u biosense /home/biosense/python/setup-python
 
@@ -147,7 +170,7 @@ elif [ "$phase" == "post-install" ]; then
     fi
 
     # List of services to be enabled and started
-    services=(
+    enable_services=(
         "wg-quick@${WG_INTERFACE}"
         "ups-monitor.service"
         "read-bme280.service"
@@ -155,9 +178,10 @@ elif [ "$phase" == "post-install" ]; then
         "run-birdnet.service"
         "manage-disk-space.service"
         "compress-recordings.service"
+        "setup-modem.service"
     )
 
-    for service in "${services[@]}"; do
+    for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" &&
             logtoboth "Enabled $service"
         sudo systemctl start "$service" &&
