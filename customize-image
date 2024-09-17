@@ -48,6 +48,12 @@ usage() {
     exit 1
 }
 
+# Function to find the latest image file in the source directory
+find_latest_image() {
+    latest_image=$(ls -t "${IMAGE_SOURCE_DIR}"/*.img | head -n 1)
+    echo "$(basename "$latest_image")"
+}
+
 # Parse command line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in

@@ -1,6 +1,7 @@
 [Unit]
 Description=Modem Setup Service
-After=ModemManager.service NetworkManager.service
+After=ModemManager.service NetworkManager.service network-online.target
+Wants=network-online.target
 Requires=ModemManager.service NetworkManager.service
 
 [Service]

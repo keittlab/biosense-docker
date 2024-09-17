@@ -20,15 +20,18 @@ APN=$(read_apn)
 
 if [ -n "$modem_iface" ]; then
     if [ -n "$APN" ]; then
-        nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" &&
-            echo "Added LTE modem connection with APN: $APN"
+        nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method auto &&
+            echo "Added LTE modem connection with APN: $APN" ||
+            echo "Failed to add LTE modem connection with APN: $APN"
     else
-        nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" &&
-            echo "Added LTE modem connection without APN"
+        nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" ipv4.method auto &&
+            echo "Added LTE modem connection without APN" ||
+            echo "Failed to add LTE modem connection without APN"
     fi
 
     nmcli c modify lte connection.autoconnect yes &&
-        echo "Set LTE connection to autoconnect"
+        echo "Set LTE connection to autoconnect" ||
+        echo "Failed to set LTE connection to autoconnect"
 else
     echo "No modem network interface found."
 fi
