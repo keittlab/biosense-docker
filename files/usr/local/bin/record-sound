@@ -10,6 +10,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from subprocess import Popen, PIPE
 from datetime import datetime
+import re
 
 # Configure logging
 log_dir = '/var/log/biosense/'
@@ -42,12 +43,67 @@ config = read_config(config_file)
 
 RECORDING_DIR = config.get('RECORDING_DIR', '/home/biosense/datastore/sound_recordings/')
 RECORDING_DURATION_MINUTES = int(config.get('RECORDING_DURATION_MINUTES', 15))  # Minutes
-CHANNELS = int(config.get('CHANNELS', 1))  # 1 for mono, 2 for stereo
 SLEEP_INTERVAL_SECONDS = int(config.get('SLEEP_INTERVAL_SECONDS', 5))  # Sleep interval in seconds
+RATE = int(config.get('RATE', 48000))  # Sample rate in Hz
+DEFAULT_FORMAT = config.get('DEFAULT_FORMAT', 'S24_3LE')  # Configurable default format
+DEFAULT_CHANNELS = int(config.get('DEFAULT_CHANNELS', 2))  # Configurable default number of channels
 
 def get_hostname():
     hostname = os.uname().nodename
     return hostname.replace('-', '_')
+
+# Function to automatically detect hardware ID
+def get_hw_params():
+    try:
+        # List available capture devices
+        process = Popen(["arecord", "-l"], stdout=PIPE, stderr=PIPE, text=True)
+        stdout, stderr = process.communicate()
+        logging.info(f"arecord -l output: {stdout}")
+        
+        if process.returncode != 0:
+            logging.error(f"Error in arecord -l: {stderr}")
+            return None
+
+        # Example output parsing: card 1, device 0
+        match = re.search(r"card (\d+):.*device (\d+):", stdout)
+        if match:
+            card = match.group(1)
+            device = match.group(2)
+            hw_id = f"hw:{card},{device}"
+            logging.info(f"Detected hardware ID: {hw_id}")
+            return hw_id
+        else:
+            logging.error("No capture device found.")
+            return None
+    except Exception as e:
+        logging.error(f"Error detecting hardware: {e}")
+        return None
+
+# Function to detect supported format and channels using --dump-hw-params or fallback to arecord -L
+def get_supported_format_and_channels(hw_id):
+    try:
+        # Add -f S24_3LE to prevent defaulting to 8-bit format
+        process = Popen(["arecord", "-D", hw_id, "--dump-hw-params", "-f", DEFAULT_FORMAT, "-d", "0"], stdout=PIPE, stderr=PIPE, text=True)
+        stdout, stderr = process.communicate()
+
+        logging.info(f"arecord --dump-hw-params output: {stdout}")
+        if process.returncode != 0:
+            logging.error(f"Error in arecord --dump-hw-params: {stderr}")
+            return DEFAULT_FORMAT, DEFAULT_CHANNELS  # Default format and channels in case of error
+
+        # Search for available formats in the output
+        format_match = re.search(r"Available formats:\s*-\s*(\S+)", stdout)
+        format_supported = format_match.group(1) if format_match else DEFAULT_FORMAT  # Default to config format
+
+        # Search for the supported number of channels
+        channels_match = re.search(r"CHANNELS:\s*(\d+)", stdout)
+        channels_supported = int(channels_match.group(1)) if channels_match else DEFAULT_CHANNELS  # Default to config channels
+
+        logging.info(f"Detected supported format: {format_supported}, channels: {channels_supported}")
+        return format_supported, channels_supported
+    except Exception as e:
+        logging.error(f"Error detecting hardware format and channels: {e}")
+        return DEFAULT_FORMAT, DEFAULT_CHANNELS  # Default to config format and channels if detection fails
 
 def start_recording():
     try:
@@ -69,11 +125,23 @@ def start_recording():
     hostname = get_hostname()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_pattern = os.path.join(RECORDING_DIR, f'arecord_{hostname}_{formatted_lat_lon}_{timestamp}.wav')
+
+    # Detect hardware ID and supported format and channels
+    hw_id = get_hw_params()
+    if hw_id is None:
+        logging.error("Unable to detect hardware. Exiting.")
+        sys.exit(1)
+
+    FORMAT, CHANNELS = get_supported_format_and_channels(hw_id)  # Get the supported format and channels
+
+    # Use detected hardware ID, format, and channels
     arecord_command = [
-        "arecord", "-f", "S16_LE", f"-c{CHANNELS}", "-r48000", "-t", "wav",
+        "arecord", "-D", hw_id, "-f", FORMAT, f"-c{CHANNELS}", f"-r{RATE}", "-t", "wav",
         "--max-file-time", str(RECORDING_DURATION_MINUTES * 60), file_pattern  # Convert minutes to seconds
     ]
     logging.info(f"Starting recording with command: {' '.join(arecord_command)}")
+
+    # Run the process
     process = Popen(arecord_command, stdout=PIPE, stderr=PIPE)
 
     def signal_handler(sig, frame):

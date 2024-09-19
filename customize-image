@@ -9,6 +9,7 @@ DISABLE_WIFI=0
 DISABLE_BLUETOOTH=0
 DISABLE_TRIGGERHAPPY=0
 DISABLE_SSH_PASSWORDS=0
+NO_BOOT_SCRIPTS=0 # New variable for --no-boot-scripts
 WIFI_SSID=""
 WIFI_PASSWORD=""
 WG_IP=""
@@ -45,6 +46,7 @@ usage() {
     echo "  --longitude <longitude>        : Specify the longitude."
     echo "  --wait-timesync                : Wait for time synchronization."
     echo "  --apn <apn>                    : Specify the APN for the cellular network (default: empty)."
+    echo "  --no-boot-scripts              : Omit --bootscripts from the sdm command."
     exit 1
 }
 
@@ -133,9 +135,13 @@ while [[ "$#" -gt 0 ]]; do
         WAIT_TIMESYNC=1
         shift 1
         ;;
-    --apn) # New argument for APN
+    --apn)
         APN=$2
         shift 2
+        ;;
+    --no-boot-scripts) # New argument for --no-boot-scripts
+        NO_BOOT_SCRIPTS=1
+        shift 1
         ;;
     *)
         echo "Invalid option: $1" 1>&2
@@ -208,6 +214,11 @@ docker build -t "${DOCKER_IMAGE_NAME}" .
 SDM_COMMAND="sudo sdm --customize --extend --xmb 2048"
 if [[ ${DEBUG} -eq 0 ]]; then
     SDM_COMMAND="${SDM_COMMAND} --batch"
+fi
+
+# Add the --bootscripts argument unless --no-boot-scripts was provided
+if [[ ${NO_BOOT_SCRIPTS} -eq 0 ]]; then
+    SDM_COMMAND="${SDM_COMMAND} --bootscripts"
 fi
 
 # Construct the disables plugin string

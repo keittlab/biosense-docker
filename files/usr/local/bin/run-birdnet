@@ -196,7 +196,11 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
             session.rollback()
 
 def analyze_recordings():
-    analyzer = Analyzer()
+    try:
+        analyzer = Analyzer()
+    except Exception as e:
+        logging.error(f"Failed to initialize Analyzer: {e}")
+        return
 
     while True:
         logging.info("Starting to analyze recordings.")
