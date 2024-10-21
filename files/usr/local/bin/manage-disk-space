@@ -128,7 +128,9 @@ def main():
             if percent_used > DISK_USAGE_CLEANUP_THRESHOLD:
                 logging.warning(f"Disk usage for {path_to_monitor} exceeded cleanup threshold: {percent_used:.2f}% used")
                 delete_random_recording_from_db()
+                percent_used = check_disk_usage(path_to_monitor)
                 while percent_used > DISK_USAGE_STOP_CLEANUP_THRESHOLD:
+                    delete_random_recording_from_db()
                     percent_used = check_disk_usage(path_to_monitor)
                     time.sleep(1)  # Short delay to allow the system to update disk usage
             
