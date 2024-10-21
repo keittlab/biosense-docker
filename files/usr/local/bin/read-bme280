@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, DateTime, String, 
 from sqlalchemy.orm import declarative_base, sessionmaker
 import toml
 import board
+import smbus2
 from adafruit_bme280 import basic as adafruit_bme280
 import logging
 from logging.handlers import RotatingFileHandler
@@ -43,15 +44,24 @@ def create_session(engine):
     Session = sessionmaker(bind=engine)
     return Session()
 
-def initialize_sensor():
-    i2c = board.I2C()
-    try:
-        bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c)
-        bme280.sea_level_pressure = 1013.25  # Standard atmospheric pressure at sea level in hPa
-        return bme280
-    except Exception as e:
-        logging.error(f"BME280 i2c address could not be found: {e}")
-        return None
+def initialize_sensors():
+    # Common I2C addresses for BME280 are 0x76 and 0x77
+    possible_addresses = [0x76, 0x77]
+    sensors = []
+    
+    for address in possible_addresses:
+        try:
+            bme280 = adafruit_bme280.Adafruit_BME280_I2C(board.I2C(), address=address)
+            bme280.sea_level_pressure = 1013.25  # Standard atmospheric pressure at sea level in hPa
+            sensors.append((address, bme280))
+            logging.info(f"Initialized BME280 sensor at I2C address: {hex(address)}")
+        except Exception as e:
+            logging.warning(f"Failed to initialize BME280 at address {hex(address)}: {e}")
+    
+    if not sensors:
+        logging.error("No BME280 sensors detected on the I2C bus.")
+    
+    return sensors
 
 def get_sensor_data(bme280):
     data = {
@@ -126,24 +136,30 @@ def main():
     session = create_session(engine)
     Base.metadata.create_all(engine)
 
-    bme280 = initialize_sensor()
+    sensors = initialize_sensors()
 
-    logging.info(f"Recording BME280 readings to SQLite database every {interval} seconds")
+    if not sensors:
+        logging.error("No sensors initialized. Exiting.")
+        sys.exit(1)
+    
+    logging.info(f"Recording BME280 readings from {len(sensors)} sensors to SQLite database every {interval} seconds")
 
     while True:
-        data = get_sensor_data(bme280)
-        new_reading = BME280Reading(
-            hostname=hostname,
-            latitude=latitude,
-            longitude=longitude,
-            timestamp=datetime.utcnow(),
-            temperature=data['temp'],
-            humidity=data['hum'],
-            pressure=data['pres']
-        )
-        session.add(new_reading)
-        session.commit()
-        logging.info(f"Hostname: {hostname}, Lat: {latitude}, Lon: {longitude}, Timestamp: {strftime('%Y-%m-%d %H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}")
+        for address, bme280 in sensors:
+            data = get_sensor_data(bme280)
+            new_reading = BME280Reading(
+                hostname=hostname,
+                latitude=latitude,
+                longitude=longitude,
+                timestamp=datetime.utcnow(),
+                temperature=data['temp'],
+                humidity=data['hum'],
+                pressure=data['pres']
+            )
+            session.add(new_reading)
+            session.commit()
+            logging.info(f"Sensor at {hex(address)} - Hostname: {hostname}, Lat: {latitude}, Lon: {longitude}, "
+                         f"Timestamp: {strftime('%Y-%m-%d %H:%M:%S')}, Temp: {data['temp']}, Hum: {data['hum']}, Pres: {data['pres']}")
         sleep(interval)  # Sleep for the specified interval
 
 if __name__ == "__main__":
