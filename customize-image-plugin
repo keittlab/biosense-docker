@@ -183,8 +183,6 @@ elif [ "$phase" == "post-install" ]; then
     for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" &&
             logtoboth "Enabled $service"
-        # sudo systemctl start "$service" &&
-        #    logtoboth "Started $service"
     done
 
     # Set time zone to UTC for uniformity across clients

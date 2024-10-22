@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Restart the network manager
+sudo systemctl restart ModemManager.service
+
 # Path to the configuration file
 CONFIG_FILE="/etc/biosense/setup-modem.conf"
 
@@ -32,6 +35,14 @@ if [ -n "$modem_iface" ]; then
     nmcli c modify lte connection.autoconnect yes &&
         echo "Set LTE connection to autoconnect" ||
         echo "Failed to set LTE connection to autoconnect"
+
+    nmcli radio wwan on &&
+        echo "Enabled the wwan radio" ||
+        echo "Unable to start the wwan radio"
+
+    nmcli c up lte &&
+        echo "The LTE interface is up" ||
+        echo "The LTE interface did not start"
 else
     echo "No modem network interface found."
 fi
