@@ -43,16 +43,16 @@ def convert_to_flac(wav_file, flac_file):
 def scan_and_convert():
     while True:
         logging.info("Scanning for .wav files to convert to .flac")
-        files = sorted(os.listdir(RECORDING_DIR), key=lambda x: os.path.getctime(os.path.join(RECORDING_DIR, x)))
+        current_time = time.time()
+        files = os.listdir(RECORDING_DIR)
         wav_files = [f for f in files if f.endswith(".wav")]
 
-        if len(wav_files) < 2:
-            logging.info("Less than two recording files found, waiting for 15 minutes.")
-            time.sleep(900)
-            continue
-
-        for filename in wav_files[:-1]:  # Exclude the newest file
+        for filename in wav_files:
             filepath = os.path.join(RECORDING_DIR, filename)
+            # Check if the file has not been modified in the last 900 seconds
+            if current_time - os.path.getmtime(filepath) < 900:
+                continue
+
             flac_file = filepath.replace(".wav", ".flac")
             logging.info(f"Processing file: {filepath}")
 
@@ -70,7 +70,8 @@ def scan_and_convert():
                 logging.info(f"Deleted original .wav file: {filepath}")
             except Exception as e:
                 logging.error(f"Error deleting .wav file {filepath}: {e}")
-        time.sleep(60)  # Check every minute
+
+        time.sleep(300)  # Check every 5 minutes
 
 def main():
     logging.info("Starting the WAV to FLAC compression service")

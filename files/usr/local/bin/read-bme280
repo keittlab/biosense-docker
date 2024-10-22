@@ -33,6 +33,7 @@ class BME280Reading(Base):
     latitude = Column(Float)
     longitude = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    address = Column(String)  # New column to store the sensor's I2C address
     temperature = Column(Float)
     humidity = Column(Float)
     pressure = Column(Float)
@@ -44,12 +45,10 @@ def create_session(engine):
     Session = sessionmaker(bind=engine)
     return Session()
 
-def initialize_sensors():
-    # Common I2C addresses for BME280 are 0x76 and 0x77
-    possible_addresses = [0x76, 0x77]
+def initialize_sensors(addresses):
     sensors = []
     
-    for address in possible_addresses:
+    for address in addresses:
         try:
             bme280 = adafruit_bme280.Adafruit_BME280_I2C(board.I2C(), address=address)
             bme280.sea_level_pressure = 1013.25  # Standard atmospheric pressure at sea level in hPa
@@ -119,11 +118,12 @@ def main():
 
     interval = config['DEFAULT'].get('INTERVAL', 300)
     db_path = config['DEFAULT'].get('DB_PATH', '/home/biosense/datastore/sensor_data.db')
+    addresses = config['DEFAULT'].get('ADDRESSES', [0x76, 0x77])
     latitude = float(os.getenv('LATITUDE', '0.0'))
     longitude = float(os.getenv('LONGITUDE', '0.0'))
     hostname = os.uname().nodename.replace('-', '_')
 
-    expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'temperature', 'humidity', 'pressure'}
+    expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'address', 'temperature', 'humidity', 'pressure'}
 
     engine = get_engine(db_path)
     
@@ -136,7 +136,7 @@ def main():
     session = create_session(engine)
     Base.metadata.create_all(engine)
 
-    sensors = initialize_sensors()
+    sensors = initialize_sensors(addresses)
 
     if not sensors:
         logging.error("No sensors initialized. Exiting.")
@@ -152,6 +152,7 @@ def main():
                 latitude=latitude,
                 longitude=longitude,
                 timestamp=datetime.utcnow(),
+                address=hex(address),  # Store the I2C address
                 temperature=data['temp'],
                 humidity=data['hum'],
                 pressure=data['pres']
