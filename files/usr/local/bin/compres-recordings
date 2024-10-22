@@ -16,6 +16,23 @@ logging.basicConfig(level=logging.INFO, handlers=[log_handler],
 
 RECORDING_DIR = '/home/biosense/datastore/sound_recordings'
 
+def check_wav_integrity(wav_file):
+    try:
+        result = subprocess.run(['ffmpeg', '-v', 'error', '-i', wav_file, '-f', 'null', '-'], capture_output=True, text=True)
+        if result.returncode != 0 or result.stderr:
+            logging.warning(f"Integrity check failed for {wav_file}: {result.stderr.strip()}")
+            # Delete the corrupt file after logging
+            try:
+                os.remove(wav_file)
+                logging.info(f"Deleted corrupt .wav file: {wav_file}")
+            except Exception as e:
+                logging.error(f"Error deleting corrupt .wav file {wav_file}: {e}")
+            return False
+        return True
+    except Exception as e:
+        logging.error(f"Error checking integrity of {wav_file}: {e}")
+        return False
+
 def convert_to_flac(wav_file, flac_file):
     try:
         subprocess.run(['ffmpeg', '-i', wav_file, flac_file], check=True)
@@ -38,6 +55,13 @@ def scan_and_convert():
             filepath = os.path.join(RECORDING_DIR, filename)
             flac_file = filepath.replace(".wav", ".flac")
             logging.info(f"Processing file: {filepath}")
+
+            # Check integrity before converting
+            if not check_wav_integrity(filepath):
+                logging.warning(f"Skipping {filepath} due to integrity issues.")
+                continue
+
+            # Convert the file if it passes integrity checks
             convert_to_flac(filepath, flac_file)
 
             # Optionally, delete the original .wav file after conversion

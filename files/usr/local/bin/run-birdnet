@@ -152,6 +152,12 @@ def on_analyze_complete(recording, recording_timestamp):
 
 def on_error(recording, error):
     logging.error(f"Error: {error} in {recording.path}")
+    # Attempt to delete the corrupted .flac file
+    try:
+        os.remove(recording.path)
+        logging.info(f"Deleted corrupt .flac file: {recording.path}")
+    except Exception as e:
+        logging.error(f"Failed to delete corrupt .flac file {recording.path}: {e}")
 
 def extract_detected_segments(recording, recording_timestamp, source_recording_path):
     export_dir_partitioned = create_partitioned_dir(EXPORT_DIR, recording_timestamp)
@@ -232,7 +238,7 @@ def analyze_recordings():
                 new_source_recording_path = on_analyze_complete(recording, recording_timestamp)
                 extract_detected_segments(recording, recording_timestamp, new_source_recording_path)
             except Exception as e:
-                on_error(recording, e)
+                on_error(recording, e)  # Handle and delete corrupt files
         time.sleep(10)
 
 def main():
