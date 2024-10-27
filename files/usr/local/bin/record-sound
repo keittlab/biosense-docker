@@ -123,8 +123,6 @@ def start_recording():
     formatted_lat_lon = f"{lat_str}{lat_direction}_{lon_str}{lon_direction}"
 
     hostname = get_hostname()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_pattern = os.path.join(RECORDING_DIR, f'arecord_{hostname}_{formatted_lat_lon}_{timestamp}.wav')
 
     # Detect hardware ID and supported format and channels
     hw_id = get_hw_params()
@@ -133,6 +131,10 @@ def start_recording():
         sys.exit(1)
 
     FORMAT, CHANNELS = get_supported_format_and_channels(hw_id)  # Get the supported format and channels
+
+    # Get timestamp just before launching arecord
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_pattern = os.path.join(RECORDING_DIR, f'arecord_{hostname}_{formatted_lat_lon}_{timestamp}.wav')
 
     # Use detected hardware ID, format, and channels
     arecord_command = [

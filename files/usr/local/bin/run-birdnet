@@ -76,6 +76,7 @@ class Detection(Base):
     is_likely = Column(Boolean, nullable=True) 
     source_recording = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
+     
 
 Index('idx_sci_name', Detection.sci_name)
 
@@ -118,13 +119,106 @@ expected_columns = ['id', 'hostname', 'latitude', 'longitude', 'timestamp', 'sta
 # Initialize database
 session = initialize_database(DB_PATH, expected_columns)
 
-def get_modification_time(filepath):
+import re
+from datetime import datetime
+
+import re
+from datetime import datetime, timedelta
+
+def get_creation_time(filepath):
     try:
-        modification_time = os.path.getmtime(filepath)
-        return datetime.fromtimestamp(modification_time)
+        # Extract initial timestamp and segment number from the filename
+        match = re.search(r"_(\d{8}_\d{6})-(\d+)", filepath)  # Pattern to match "_YYYYMMDD_HHMMSS-segment"
+        if match:
+            timestamp_str = match.group(1)
+            segment_number = int(match.group(2))
+
+            # Parse the initial timestamp
+            initial_time = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+
+            # Calculate the exact start time for this segment
+            segment_offset = timedelta(minutes=15 * (segment_number - 1))
+            return initial_time + segment_offset
+        else:
+            logging.error(f"No valid timestamp or segment number found in filename: {filepath}")
+            return None
     except Exception as e:
-        logging.error(f"Error getting modification time for file {filepath}: {e}")
+        logging.error(f"Error parsing timestamp from filename {filepath}: {e}")
         return None
+
+def create_partitioned_dir(base_dir, timestamp):
+    year = timestamp.strftime('%Y')
+    month = timestamp.strftime('%m')
+    day = timestamp.strftime('%d')
+    partitioned_dir = os.path.join(base_dir, year, month, day)
+    os.makedirs(partitioned_dir, exist_ok=True)
+    return partitioned_dir
+
+def on_analyze_complete(recording, recording_timestamp):
+    logging.info(f"Analyzed: {recording.path}")
+    logging.debug(f"Detections: {recording.detections}")
+    
+    # Move the recording after successful analysis
+    try:
+        processed_dir_partitioned = create_partitioned_dir(PROCESSED_DIR, recording_timestamp)
+        destination = os.path.join(processed_dir_partitioned, os.path.basename(recording.path))
+        shutil.move(recording.path, destination)
+        logging.debug(f"Moved recording to processed directory: {destination}")
+        return destination
+    except Exception as e:
+        logging.error(f"Error moving recording: {recording.path} - {e}")
+        return recording.path
+
+def on_error(recording, error):
+    logging.error(f"Error: {error} in {recording.path}")
+    # Attempt to delete the corrupted .flac file
+    try:
+        os.remove(recording.path)
+        logging.info(f"Deleted corrupt .flac file: {recording.path}")
+    except Exception as e:
+        logging.error(f"Failed to delete corrupt .flac file {recording.path}: {e}")
+
+def extract_detected_segments(recording, recording_timestamp, source_recording_path):
+    export_dir_partitioned = create_partitioned_dir(EXPORT_DIR, recording_timestamp)
+    if not os.path.exists(export_dir_partitioned):
+        os.makedirs(export_dir_partitioned)
+
+    # Extract audio segments of detections using BirdNET's method
+    recording.extract_detections_as_audio(directory=export_dir_partitioned)
+
+    for detection in recording.detections:
+        old_segment_filename = detection['extracted_audio_path']
+        if not old_segment_filename or not os.path.exists(old_segment_filename):
+            logging.error(f"Extracted file not found or is None: {old_segment_filename}")
+            continue
+        
+        new_segment_filename = os.path.join(export_dir_partitioned, os.path.basename(old_segment_filename))
+        shutil.move(old_segment_filename, new_segment_filename)
+        logging.debug(f"Extracted segment: {new_segment_filename}")
+
+        # Save detection to the database
+        detection_data = Detection(
+            hostname=HOSTNAME,
+            latitude=LATITUDE,
+            longitude=LONGITUDE,
+            timestamp=recording_timestamp,
+            start_time=detection['start_time'],
+            end_time=detection['end_time'],
+            sci_name=detection['scientific_name'],
+            com_name=detection['common_name'],
+            confidence=detection['confidence'],
+            is_likely=detection['is_predicted_for_location_and_date'],
+            source_recording=source_recording_path,
+            file_path=new_segment_filename,
+        )
+        try:
+            logging.debug(f"Attempting to write detection to database: {detection_data}")
+            session.add(detection_data)
+            session.commit()
+            logging.debug("Detection written to database successfully.")
+        except Exception as e:
+            logging.error(f"Error writing to database: {e}")
+            session.rollback()
 
 def analyze_recordings():
     try:
@@ -133,38 +227,40 @@ def analyze_recordings():
         logging.error(f"Failed to initialize Analyzer: {e}")
         return
 
-    logging.info("Starting to analyze recordings.")
-    files = sorted(os.listdir(RECORDING_DIR), key=lambda x: os.path.getmtime(os.path.join(RECORDING_DIR, x)))
-    flac_files = [f for f in files if f.endswith(".flac")]
+    while True:
+        logging.info("Starting to analyze recordings.")
+        current_time = time.time()
+        files = sorted(os.listdir(RECORDING_DIR), key=lambda x: os.path.getctime(os.path.join(RECORDING_DIR, x)))
+        flac_files = [f for f in files if f.endswith(".flac")]
 
-    current_time = time.time()
+        for filename in flac_files:
+            filepath = os.path.join(RECORDING_DIR, filename)
+            # Check if the file has not been modified in the last 900 seconds (15 minutes)
+            if current_time - os.path.getmtime(filepath) < 900:
+                logging.info(f"Skipping recent file: {filepath}")
+                continue
 
-    for filename in flac_files:
-        filepath = os.path.join(RECORDING_DIR, filename)
-        # Skip files modified in the last 900 seconds (15 minutes)
-        if current_time - os.path.getmtime(filepath) < 900:
-            logging.info(f"Skipping recent file: {filepath}")
-            continue
+            logging.info(f"Processing file: {filepath}")
+            recording_timestamp = get_creation_time(filepath)
+            recording = Recording(
+                analyzer, 
+                filepath,
+                lat=LATITUDE, 
+                lon=LONGITUDE, 
+                overlap=OVERLAP,
+                min_conf=MIN_CONF,
+                sensitivity=SENSITIVITY,
+                date=recording_timestamp,
+                return_all_detections=True
+            )
+            try:
+                recording.analyze()
+                new_source_recording_path = on_analyze_complete(recording, recording_timestamp)
+                extract_detected_segments(recording, recording_timestamp, new_source_recording_path)
+            except Exception as e:
+                on_error(recording, e)  # Handle and delete corrupt files
 
-        logging.info(f"Processing file: {filepath}")
-        recording_timestamp = get_modification_time(filepath)
-        recording = Recording(
-            analyzer, 
-            filepath,
-            lat=LATITUDE, 
-            lon=LONGITUDE, 
-            overlap=OVERLAP,
-            min_conf=MIN_CONF,
-            sensitivity=SENSITIVITY,
-            date=recording_timestamp,
-            return_all_detections=True
-        )
-        try:
-            recording.analyze()
-            new_source_recording_path = on_analyze_complete(recording, recording_timestamp)
-            extract_detected_segments(recording, recording_timestamp, new_source_recording_path)
-        except Exception as e:
-            on_error(recording, e)  # Handle and delete corrupt files
+        time.sleep(300)  # Check every 5 minutes for new files
 
 def main():
     def signal_handler(sig, frame):
@@ -175,7 +271,7 @@ def main():
     logging.info("Starting main loop.")
     while True:
         analyze_recordings()
-        time.sleep(300)  # Check every 5 minutes
+        time.sleep(60)  # Check every minute
 
 if __name__ == "__main__":
     main()
