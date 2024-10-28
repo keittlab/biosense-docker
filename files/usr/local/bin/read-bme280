@@ -125,16 +125,22 @@ def main():
 
     expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'address', 'temperature', 'humidity', 'pressure'}
 
-    engine = get_engine(db_path)
-    
-    if not validate_database(engine, expected_columns):
-        backup_db_path = f"{db_path}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        logging.warning(f"Database schema does not match. Moving existing database to {backup_db_path}")
-        shutil.move(db_path, backup_db_path)
+    # Check if the database exists before attempting validation
+    if os.path.exists(db_path):
+        engine = get_engine(db_path)
+        if not validate_database(engine, expected_columns):
+            # If the database exists but schema does not match, create a backup
+            backup_db_path = f"{db_path}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            logging.warning(f"Database schema does not match. Moving existing database to {backup_db_path}")
+            shutil.move(db_path, backup_db_path)
+            engine = get_engine(db_path)  # Re-initialize engine for the new database
+    else:
+        # If the database does not exist, initialize it without creating a backup
+        logging.info("Database file not found. Creating a new database.")
         engine = get_engine(db_path)
 
     session = create_session(engine)
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)  # Create tables if not present
 
     sensors = initialize_sensors(addresses)
 
