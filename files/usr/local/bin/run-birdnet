@@ -158,7 +158,17 @@ def on_analyze_complete(recording, recording_timestamp):
     logging.info(f"Analyzed: {recording.path}")
     logging.debug(f"Detections: {recording.detections}")
     
-    # Move the recording after successful analysis
+    # Check for any human vocal detections
+    if any(detection.get('common_name') == 'Human vocal' for detection in recording.detections):
+        try:
+            os.remove(recording.path)
+            logging.info(f"Deleted source recording file due to human vocal detection: {recording.path}")
+            return None  # Return None to indicate the file was deleted
+        except Exception as e:
+            logging.error(f"Error deleting source recording file {recording.path}: {e}")
+            return recording.path  # Return the original path if deletion failed
+
+    # Move the recording to the processed directory after successful analysis
     try:
         processed_dir_partitioned = create_partitioned_dir(PROCESSED_DIR, recording_timestamp)
         destination = os.path.join(processed_dir_partitioned, os.path.basename(recording.path))
@@ -186,15 +196,30 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
     # Extract audio segments of detections using BirdNET's method
     recording.extract_detections_as_audio(directory=export_dir_partitioned)
 
+    # Process each detection segment
     for detection in recording.detections:
         old_segment_filename = detection['extracted_audio_path']
+
+        # Determine the new segment filename path
+        new_segment_filename = os.path.join(export_dir_partitioned, os.path.basename(old_segment_filename))
+
         if not old_segment_filename or not os.path.exists(old_segment_filename):
             logging.error(f"Extracted file not found or is None: {old_segment_filename}")
-            continue
-        
-        new_segment_filename = os.path.join(export_dir_partitioned, os.path.basename(old_segment_filename))
-        shutil.move(old_segment_filename, new_segment_filename)
-        logging.debug(f"Extracted segment: {new_segment_filename}")
+            new_segment_filename = None  # Set to None to log as NULL in SQLite
+        else:
+            # Check if the detected sound is human vocal
+            if detection.get('common_name') == 'Human vocal':
+                # If human voice is detected, delete the segment file and set filename to None
+                try:
+                    os.remove(old_segment_filename)
+                    logging.info(f"Deleted human vocal segment file: {old_segment_filename}")
+                    new_segment_filename = None  # Set to None to log as NULL in SQLite
+                except Exception as e:
+                    logging.error(f"Error deleting human vocal file {old_segment_filename}: {e}")
+            else:
+                # Move the non-human voice segment to the new location
+                shutil.move(old_segment_filename, new_segment_filename)
+                logging.debug(f"Extracted segment: {new_segment_filename}")
 
         # Save detection to the database
         detection_data = Detection(
@@ -209,7 +234,7 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
             confidence=detection['confidence'],
             is_likely=detection['is_predicted_for_location_and_date'],
             source_recording=source_recording_path,
-            file_path=new_segment_filename,
+            file_path=new_segment_filename,  # This will be NULL in the database if None
         )
         try:
             logging.debug(f"Attempting to write detection to database: {detection_data}")
@@ -271,7 +296,7 @@ def main():
     logging.info("Starting main loop.")
     while True:
         analyze_recordings()
-        time.sleep(60)  # Check every minute
+        time.sleep(300)  # Check every 5 minute
 
 if __name__ == "__main__":
     main()
