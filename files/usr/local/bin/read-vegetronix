@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import shutil
+from time import sleep, strftime
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, String, inspect
+from sqlalchemy.orm import declarative_base, sessionmaker
+import toml
+import board
+import busio
+import adafruit_ads1x15.ads1015 as ADS
+from adafruit_ads1x15.analog_in import AnalogIn
+import logging
+from logging.handlers import RotatingFileHandler
+import signal
+
+# Configure logging
+log_dir = '/var/log/biosense/'
+log_file = os.path.join(log_dir, 'read-vegetronix.log')
+log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
+logging.basicConfig(level=logging.INFO, handlers=[log_handler],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# SQLAlchemy setup
+Base = declarative_base()
+
+class SensorReading(Base):
+    __tablename__ = 'vegetronix_readings'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hostname = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    sensor_channel = Column(String)  # Channel of the ADS1015
+    sensor_reading = Column(Float)
+
+def get_engine(db_path):
+    return create_engine(f'sqlite:///{db_path}')
+
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+def initialize_sensors(config):
+    i2c = board.I2C()
+    ads = ADS.ADS1015(i2c, data_rate=128)
+
+    # Load channels from the config file
+    channel_names = config['DEFAULT'].get('CHANNELS', ['A0'])
+    channels_map = {'A0': ADS.P0, 'A1': ADS.P1, 'A2': ADS.P2, 'A3': ADS.P3}
+    sensors = {}
+
+    for channel_name in channel_names:
+        if channel_name in channels_map:
+            sensor = AnalogIn(ads, channels_map[channel_name])
+            sensors[channel_name] = sensor
+            logging.info(f"Initialized Vegetronix sensor on channel: {channel_name}")
+        else:
+            logging.warning(f"Channel '{channel_name}' specified in configuration is invalid")
+
+    if not sensors:
+        logging.error("No valid Vegetronix sensors detected on the specified channels.")
+    else:
+        logging.info(f"Initialized ADS1015 with Vegetronix sensors on channels: {', '.join(sensors.keys())}")
+
+    return sensors
+
+def get_sensor_data(sensor):
+    try:
+        return sensor.voltage  # Sensor level represented as voltage
+    except Exception as e:
+        logging.error(f"Could not collect data from Vegetronix sensor: {e}")
+        return 'n/a'
+
+def load_config(config_file):
+    try:
+        with open(config_file, 'r') as f:
+            config = toml.load(f)
+        return config
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
+def validate_database(engine, expected_columns):
+    inspector = inspect(engine)
+    if 'vegetronix_readings' in inspector.get_table_names():
+        columns = inspector.get_columns('vegetronix_readings')
+        column_names = {column['name'] for column in columns}
+        if column_names == expected_columns:
+            return True
+    return False
+
+def handle_signal(signum, frame):
+    logging.info(f"Received signal {signum}, performing cleanup")
+    sys.exit(0)
+
+def main():
+    signal.signal(signal.SIGINT, handle_signal)  # Handle Ctrl+C
+    signal.signal(signal.SIGTERM, handle_signal)  # Handle termination signal
+
+    config_file = '/etc/biosense/read-vegetronix.conf'
+    config = load_config(config_file)
+
+    interval = config['DEFAULT'].get('INTERVAL', 300)
+    db_path = config['DEFAULT'].get('DB_PATH', '/home/biosense/datastore/vegetronix_data.db')
+    latitude = float(os.getenv('LATITUDE', '0.0'))
+    longitude = float(os.getenv('LONGITUDE', '0.0'))
+    hostname = os.uname().nodename.replace('-', '_')
+
+    expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'sensor_channel', 'sensor_reading'}
+
+    # Check if the database exists before attempting validation
+    if os.path.exists(db_path):
+        engine = get_engine(db_path)
+        if not validate_database(engine, expected_columns):
+            # If the database exists but schema does not match, create a backup
+            backup_db_path = f"{db_path}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            logging.warning(f"Database schema does not match. Moving existing database to {backup_db_path}")
+            shutil.move(db_path, backup_db_path)
+            engine = get_engine(db_path)  # Re-initialize engine for the new database
+    else:
+        # If the database does not exist, initialize it without creating a backup
+        logging.info("Database file not found. Creating a new database.")
+        engine = get_engine(db_path)
+
+    session = create_session(engine)
+    Base.metadata.create_all(engine)  # Create tables if not present
+
+    # Pass config to initialize_sensors to load channel settings
+    sensors = initialize_sensors(config)
+    logging.info(f"Recording Vegetronix Sensor readings to SQLite database every {interval} seconds")
+
+    while True:
+        for channel, sensor in sensors.items():
+            sensor_reading = get_sensor_data(sensor)
+            if sensor_reading != 'n/a':
+                new_reading = SensorReading(
+                    hostname=hostname,
+                    latitude=latitude,
+                    longitude=longitude,
+                    timestamp=datetime.utcnow(),
+                    sensor_channel=channel,
+                    sensor_reading=sensor_reading
+                )
+                session.add(new_reading)
+                session.commit()
+                logging.info(f"Channel {channel} - Hostname: {hostname}, Lat: {latitude}, Lon: {longitude}, "
+                             f"Timestamp: {strftime('%Y-%m-%d %H:%M:%S')}, Sensor Reading: {sensor_reading}V")
+        sleep(interval)  # Sleep for the specified interval
+
+if __name__ == "__main__":
+    main()

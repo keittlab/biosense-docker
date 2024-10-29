@@ -1,3 +1,4 @@
+adafruit-circuitpython-ads1x15
 adafruit-circuitpython-bme280
 adafruit-circuitpython-seesaw
 smbus2
@@ -10,4 +11,5 @@ psycopg2
 psycopg2-binary
 sqlalchemy
 gpiod
+
 
