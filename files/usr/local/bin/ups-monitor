@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 import logging
 
 # Configure logging
-log_dir = '/var/log/'
+log_dir = '/var/log/biosense'
 log_file = os.path.join(log_dir, 'ups-monitor.log')
 
 # Set up logging
@@ -41,6 +41,8 @@ def readCapacity(bus, address):
         return None
 
 def get_battery_status(voltage):
+    if voltage is None:
+        return "Unknown"
     if voltage > 3.78:
         return "Full"
     elif 3.7 <= voltage <= 3.78:
@@ -106,9 +108,17 @@ def main():
             while failure_counter < shutdown_threshold:
                 try:
                     external_power_state = pld_line.get_value()
+
                     voltage = readVoltage(bus, address)
-                    battery_status = get_battery_status(voltage)
                     capacity = readCapacity(bus, address)
+
+                    # Check for None before proceeding
+                    if voltage is None or capacity is None:
+                        logging.error("Failed to read voltage or capacity; skipping this iteration.")
+                        time.sleep(check_interval)
+                        continue
+
+                    battery_status = get_battery_status(voltage)
                     logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), External Power State: {'Connected' if external_power_state == 1 else 'Disconnected'}, Voltage: {voltage:.2f}V")
 
                     if external_power_state == 1:

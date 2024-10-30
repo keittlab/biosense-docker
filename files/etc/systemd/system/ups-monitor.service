@@ -5,7 +5,7 @@ After=local-fs.target
 [Service]
 ExecStart=/usr/local/bin/ups-monitor
 Restart=on-failure
-RestartSec=30
+RestartSec=300
 
 [Install]
 WantedBy=multi-user.target
