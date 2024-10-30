@@ -178,6 +178,7 @@ elif [ "$phase" == "post-install" ]; then
         "run-birdnet.service"
         "manage-disk-space.service"
         "compress-recordings.service"
+        "read-vegetronix"
     )
 
     for service in "${enable_services[@]}"; do
