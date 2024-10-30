@@ -119,8 +119,15 @@ def main():
     interval = config['DEFAULT'].get('INTERVAL', 300)
     db_path = config['DEFAULT'].get('DB_PATH', '/home/biosense/datastore/sensor_data.db')
     addresses = config['DEFAULT'].get('ADDRESSES', [0x76, 0x77])
-    latitude = float(os.getenv('LATITUDE', '0.0'))
-    longitude = float(os.getenv('LONGITUDE', '0.0'))
+    
+    # Handle empty or invalid latitude/longitude values
+    try:
+        latitude = float(os.getenv('LATITUDE', '0.0'))
+        longitude = float(os.getenv('LONGITUDE', '0.0'))
+    except ValueError:
+        latitude, longitude = 0.0, 0.0
+        logging.warning("Invalid LATITUDE or LONGITUDE environment variable; defaulting to 0.0 for both.")
+
     hostname = os.uname().nodename.replace('-', '_')
 
     expected_columns = {'id', 'hostname', 'latitude', 'longitude', 'timestamp', 'address', 'temperature', 'humidity', 'pressure'}
