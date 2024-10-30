@@ -14,27 +14,28 @@ import logging
 # Configure logging
 log_dir = '/var/log/biosense'
 log_file = os.path.join(log_dir, 'ups-monitor.log')
+birdnet_flag_file = '/var/lib/biosense/birdnet_stopped_by_ups_monitor'
 
 # Set up logging
 log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
 logging.basicConfig(level=logging.INFO, handlers=[log_handler],
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-def readVoltage(bus, address):
+def readVoltage(bus, address, scale_factor=1.0):
     try:
         read = bus.read_word_data(address, 2)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-        voltage = swapped * 1.25 / 1000 / 16
+        voltage = (swapped * 1.25 / 1000 / 16) * scale_factor  # Apply scaling factor
         return voltage
     except Exception as e:
         logging.error(f"Error reading voltage: {e}")
         return None
 
-def readCapacity(bus, address):
+def readCapacity(bus, address, scale_factor=1.0):
     try:
         read = bus.read_word_data(address, 4)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-        capacity = swapped / 256
+        capacity = (swapped / 256) * scale_factor  # Apply scaling factor
         return capacity
     except Exception as e:
         logging.error(f"Error reading capacity: {e}")
@@ -70,8 +71,10 @@ def main():
     config_file = '/etc/biosense/ups-monitor.conf'
     config = load_config(config_file)
     logging.info("Configuration file loaded")
+    os.makedirs('/var/lib/biosense', exist_ok=True)
 
     try:
+        # Load configuration options with scaling factors
         shutdown_threshold = config['DEFAULT'].get('SHUTDOWN_THRESHOLD', 3)
         pld_pin = config['DEFAULT'].get('PLD_PIN', 6)
         battery_low_threshold = config['DEFAULT'].get('BATTERY_LOW_THRESHOLD', 20)
@@ -80,6 +83,8 @@ def main():
         shutdown_delay = config['DEFAULT'].get('SHUTDOWN_DELAY', 1)
         bus_number = config['DEFAULT'].get('BUS', 1)
         address = int(config['DEFAULT'].get('ADDRESS', "0x36"), 16)
+        voltage_scale = config['DEFAULT'].get('VOLTAGE_SCALE', 1.0)
+        capacity_scale = config['DEFAULT'].get('CAPACITY_SCALE', 1.0)
         loop = config['DEFAULT'].get('LOOP', True)
 
         # BirdNET parameters
@@ -102,17 +107,18 @@ def main():
         pld_line.request(consumer="PLD", type=gpiod.LINE_REQ_DIR_IN)
         logging.info("GPIO line requested")
 
+        # Check if BirdNET was stopped by this script in a previous run
+        birdnet_stopped_by_script = os.path.exists(birdnet_flag_file)
+
         while True:
             failure_counter = 0
 
             while failure_counter < shutdown_threshold:
                 try:
                     external_power_state = pld_line.get_value()
+                    voltage = readVoltage(bus, address, scale_factor=voltage_scale)
+                    capacity = readCapacity(bus, address, scale_factor=capacity_scale)
 
-                    voltage = readVoltage(bus, address)
-                    capacity = readCapacity(bus, address)
-
-                    # Check for None before proceeding
                     if voltage is None or capacity is None:
                         logging.error("Failed to read voltage or capacity; skipping this iteration.")
                         time.sleep(check_interval)
@@ -127,15 +133,24 @@ def main():
                             shutdown_initiated = False
                             logging.info("Shutdown canceled due to external power restored.")
                         failure_counter = 0
-                        # Check conditions to resume BirdNET service
-                        if capacity > run_birdnet_capacity_resume and voltage > run_birdnet_voltage_resume:
+                        # Check conditions to resume BirdNET service if it was stopped by this script
+                        if birdnet_stopped_by_script and capacity > run_birdnet_capacity_resume and voltage > run_birdnet_voltage_resume:
                             call("systemctl start run-birdnet", shell=True)
                             logging.info("BirdNET service resumed")
+                            # Check if the flag file exists, indicating a potential issue
+                            if os.path.exists(birdnet_flag_file):
+                                logging.error("Unexpected: BirdNET flag file exists despite service resumption. Removing flag file.")
+                                os.remove(birdnet_flag_file)  # Remove flag file to reset state
+                            birdnet_stopped_by_script = False
                     else:
                         # Check conditions to stop BirdNET service
                         if capacity < run_birdnet_capacity_stop or voltage < run_birdnet_voltage_stop:
-                            call("systemctl stop run-birdnet", shell=True)
-                            logging.info("BirdNET service stopped")
+                            if not birdnet_stopped_by_script:
+                                call("systemctl stop run-birdnet", shell=True)
+                                logging.info("BirdNET service stopped")
+                                birdnet_stopped_by_script = True
+                                with open(birdnet_flag_file, 'w') as f:
+                                    f.write("BirdNET service stopped by ups-monitor\n")  # Create flag file
                         failure_counter += 1
 
                     if failure_counter < shutdown_threshold:
