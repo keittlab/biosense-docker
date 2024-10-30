@@ -53,9 +53,14 @@ MIN_CONF = float(config.get('MIN_CONF', 0.1))  # Read min_conf from config
 OVERLAP = float(config.get('OVERLAP', 1.5))  # Read overlap from config
 SENSITIVITY = float(config.get('SENSITIVITY', 1.0))  # Read sensitivity from config
 
-# Get latitude and longitude from environment variables
-LATITUDE = float(os.getenv('LATITUDE', '0.0'))
-LONGITUDE = float(os.getenv('LONGITUDE', '0.0'))
+# Handle empty or invalid latitude/longitude values
+try:
+    LATITUDE = float(os.getenv('LATITUDE', '0.0'))
+    LONGITUDE = float(os.getenv('LONGITUDE', '0.0'))
+except ValueError:
+    LATITUDE, LONGITUDE = 0.0, 0.0
+    logging.warning("Invalid LATITUDE or LONGITUDE environment variable; defaulting to 0.0 for both.")
+
 HOSTNAME = os.uname().nodename.replace('-', '_')
 
 # SQLAlchemy setup
