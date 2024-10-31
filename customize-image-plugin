@@ -126,6 +126,7 @@ elif [ "$phase" == "post-install" ]; then
         "manage-disk-space.service"
         "compress-recordings.service"
         "read-vegetronix.service"
+        "case-led.service"
     )
     for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" && logtoboth "Enabled $service"

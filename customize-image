@@ -46,8 +46,8 @@ usage() {
     echo "  --longitude <longitude>        : Specify the longitude."
     echo "  --wait-timesync                : Wait for time synchronization."
     echo "  --apn <apn>                    : Specify the APN for the cellular network (default: empty)."
-    echo "  --static-ip <ip_address>       : Specify a static IP for the cellular network."
-    echo "  --gateway <gateway_ip>         : Specify the gateway for the static IP configuration."
+    echo "  --sim-ip <ip_address>          : Specify a static IP for the cellular network."
+    echo "  --sim-gateway <gateway_ip>     : Specify the gateway for the static IP configuration."
     echo "  --no-boot-scripts              : Omit --bootscripts from the sdm command."
     exit 1
 }
@@ -141,11 +141,11 @@ while [[ "$#" -gt 0 ]]; do
         APN=$2
         shift 2
         ;;
-    --static-ip)
+    --sim-ip)
         STATIC_IP=$2
         shift 2
         ;;
-    --gateway)
+    --sim-gateway)
         GATEWAY=$2
         shift 2
         ;;
@@ -248,9 +248,9 @@ DISABLES="piwiz|${DISABLES}"
 PLUGIN_ARGS="wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}"
 [ -n "${WIFI_SSID}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifissid=${WIFI_SSID}"
 [ -n "${WIFI_PASSWORD}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifipassword=${WIFI_PASSWORD}"
-[ -n "${APN}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|apn=${APN}"                      # Add APN if provided
-[ -n "${IP_ADDRESS}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|ip_address=${IP_ADDRESS}" # Add IP address if provided
-[ -n "${GATEWAY}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|gateway=${GATEWAY}"          # Add Gateway if provided
+[ -n "${APN}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|apn=${APN}"                    # Add APN if provided
+[ -n "${STATIC_IP}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|ip_address=${STATIC_IP}" # Add IP address if provided
+[ -n "${GATEWAY}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|gateway=${GATEWAY}"        # Add Gateway if provided
 
 # Remove trailing '|' and add PLUGIN_ARGS to SDM_COMMAND
 if [[ -n "${PLUGIN_ARGS}" ]]; then
