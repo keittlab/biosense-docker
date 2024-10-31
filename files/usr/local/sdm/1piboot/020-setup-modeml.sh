@@ -6,30 +6,48 @@ sudo systemctl restart ModemManager.service
 # Path to the configuration file
 CONFIG_FILE="/etc/biosense/setup-modem.conf"
 
-# Function to read APN from the configuration file
-read_apn() {
+# Function to read values from the configuration file
+read_config() {
     local apn=""
+    local ip_address=""
+    local gateway=""
     if [ -f "$CONFIG_FILE" ]; then
-        apn=$(grep -i 'apn' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs) # Extract APN value
+        apn=$(grep -i 'apn' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
+        ip_address=$(grep -i 'ip_address' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
+        gateway=$(grep -i 'gateway' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
     fi
-    echo "$apn"
+    echo "$apn" "$ip_address" "$gateway"
 }
 
 # Detect the modem interface (e.g., wwan0)
 modem_iface=$(nmcli dev status | grep gsm | awk '{print $1}')
 
-# Read APN from the configuration file
-APN=$(read_apn)
+# Read configuration values
+read -r APN IP_ADDRESS GATEWAY <<<$(read_config)
+
+# Check if APN is defined or empty
+if [ -z "$APN" ]; then
+    echo "Warning: APN is not defined in $CONFIG_FILE"
+fi
 
 if [ -n "$modem_iface" ]; then
     if [ -n "$APN" ]; then
-        nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method auto &&
-            echo "Added LTE modem connection with APN: $APN" ||
-            echo "Failed to add LTE modem connection with APN: $APN"
+        # Add LTE modem connection with either static IP or DHCP
+        if [ -n "$IP_ADDRESS" ] && [ -n "$GATEWAY" ]; then
+            # Set up a static IP configuration
+            nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method manual ipv4.addresses "$IP_ADDRESS/24" ipv4.gateway "$GATEWAY" ipv4.dns "8.8.8.8,8.8.4.4" &&
+                echo "Added LTE modem connection with APN: $APN, static IP: $IP_ADDRESS, and gateway: $GATEWAY" ||
+                echo "Failed to add LTE modem connection with APN: $APN, static IP: $IP_ADDRESS, and gateway: $GATEWAY"
+        else
+            # Use DHCP if static IP and gateway are not provided
+            nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method auto &&
+                echo "Added LTE modem connection with APN: $APN using DHCP" ||
+                echo "Failed to add LTE modem connection with APN: $APN using DHCP"
+        fi
     else
         nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" ipv4.method auto &&
-            echo "Added LTE modem connection without APN" ||
-            echo "Failed to add LTE modem connection without APN"
+            echo "Added LTE modem connection without APN using DHCP" ||
+            echo "Failed to add LTE modem connection without APN using DHCP"
     fi
 
     nmcli c modify lte connection.autoconnect yes &&

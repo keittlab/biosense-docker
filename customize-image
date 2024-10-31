@@ -14,8 +14,8 @@ WIFI_SSID=""
 WIFI_PASSWORD=""
 WG_IP=""
 WIFI_COUNTRY="US"
-LATITUDE=""
-LONGITUDE=""
+LATITUDE="30.266666"
+LONGITUDE="-97.733330"
 CONFIG_FILE=""
 SAVE_CONFIG_FILE=""
 UPDATE_CONFIG=0
@@ -46,6 +46,8 @@ usage() {
     echo "  --longitude <longitude>        : Specify the longitude."
     echo "  --wait-timesync                : Wait for time synchronization."
     echo "  --apn <apn>                    : Specify the APN for the cellular network (default: empty)."
+    echo "  --static-ip <ip_address>       : Specify a static IP for the cellular network."
+    echo "  --gateway <gateway_ip>         : Specify the gateway for the static IP configuration."
     echo "  --no-boot-scripts              : Omit --bootscripts from the sdm command."
     exit 1
 }
@@ -137,6 +139,14 @@ while [[ "$#" -gt 0 ]]; do
         ;;
     --apn)
         APN=$2
+        shift 2
+        ;;
+    --static-ip)
+        STATIC_IP=$2
+        shift 2
+        ;;
+    --gateway)
+        GATEWAY=$2
         shift 2
         ;;
     --no-boot-scripts) # New argument for --no-boot-scripts
@@ -238,8 +248,11 @@ DISABLES="piwiz|${DISABLES}"
 PLUGIN_ARGS="wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}"
 [ -n "${WIFI_SSID}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifissid=${WIFI_SSID}"
 [ -n "${WIFI_PASSWORD}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifipassword=${WIFI_PASSWORD}"
-[ -n "${APN}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|apn=${APN}" # Add APN if provided
+[ -n "${APN}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|apn=${APN}"                      # Add APN if provided
+[ -n "${IP_ADDRESS}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|ip_address=${IP_ADDRESS}" # Add IP address if provided
+[ -n "${GATEWAY}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|gateway=${GATEWAY}"          # Add Gateway if provided
 
+# Remove trailing '|' and add PLUGIN_ARGS to SDM_COMMAND
 if [[ -n "${PLUGIN_ARGS}" ]]; then
     PLUGIN_ARGS="${PLUGIN_ARGS%|}" # Remove trailing '|'
     SDM_COMMAND="${SDM_COMMAND} --plugin @/home/agent/hostdir/sdm-plugin-commands --plugin /home/agent/hostdir/customize-image-plugin:\"${PLUGIN_ARGS}\""

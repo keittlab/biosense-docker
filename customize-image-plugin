@@ -21,18 +21,13 @@ copy_and_set_ownership() {
 
     if [ -d "$src_dir" ]; then
         find "$src_dir" | while read -r src_item; do
-            # Get the relative path of the item from the source directory
             rel_path="${src_item#$src_dir}"
             dest_item="$dest_dir$rel_path"
-
-            # Check if the item exists in the destination
             if [ ! -e "$dest_item" ]; then
                 if [ -d "$src_item" ]; then
-                    # Create the directory in the destination
                     mkdir -p "$dest_item"
                     chown "$owner:$group" "$dest_item"
                 elif [ -f "$src_item" ]; then
-                    # Copy the file to the destination
                     cp "$src_item" "$dest_item"
                     chown "$owner:$group" "$dest_item"
                 fi
@@ -43,20 +38,20 @@ copy_and_set_ownership() {
     fi
 }
 
-# Function to update APN in /etc/biosense/setup-modem.conf
-update_apn_config() {
+# Function to update APN, IP address, and gateway in /etc/biosense/setup-modem.conf
+update_config_file() {
     local apn_value="$1"
-    local config_file="$2"
+    local ip_value="$2"
+    local gateway_value="$3"
+    local config_file="$4"
 
-    # Check if the file exists
     if [ -f "$config_file" ]; then
-        if [ -n "$apn_value" ]; then
-            # Update the APN line in the file if APN is provided
-            sed -i "s/^apn=.*/apn=$apn_value/" "$config_file"
+        [ -n "$apn_value" ] && sed -i "s/^apn=.*/apn=$apn_value/" "$config_file" &&
             logtoboth "Updated APN value to '$apn_value' in $config_file"
-        else
-            logtoboth "APN not provided, keeping existing value in $config_file"
-        fi
+        [ -n "$ip_value" ] && sed -i "s/^ip_address=.*/ip_address=$ip_value/" "$config_file" &&
+            logtoboth "Updated IP address to '$ip_value' in $config_file"
+        [ -n "$gateway_value" ] && sed -i "s/^gateway=.*/gateway=$gateway_value/" "$config_file" &&
+            logtoboth "Updated gateway to '$gateway_value' in $config_file"
     else
         logtoboth "Config file $config_file does not exist."
     fi
@@ -66,7 +61,7 @@ update_apn_config() {
 phase=$1
 pfx="$(basename "$0")"
 args="$2"
-vldargs="|wg_ip|latitude|longitude|edit_sshd_config|apn|"
+vldargs="|wg_ip|latitude|longitude|edit_sshd_config|apn|ip_address|gateway|"
 reqargs="|wg_ip|latitude|longitude|"
 loadparams
 
@@ -78,98 +73,50 @@ APN_CONFIG_FILE="/etc/biosense/setup-modem.conf"
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
 
 if [ "$phase" == "0" ]; then
-    #
-    # In Phase 0 all references to directories in the image must be preceded by $SDMPT
-    #
     logtoboth "* Plugin $pfx: Start Phase 0"
     plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
-    #
-    # Print the keys found (example usage). plugin_getargs returns the list of found keys in $foundkeys
-    #
     plugin_printkeys
     mkdir -p $assetdir
-
-    # Log the values for debugging
-    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, apn=${apn}, edit_sshd_config=${edit_sshd_config}"
-
-    # Biosense is not defined and 1000 *should* be the first user
+    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, apn=${apn}, ip_address=${ip_address}, gateway=${gateway}, edit_sshd_config=${edit_sshd_config}"
     copy_and_set_ownership /home/agent/hostdir/files/home/biosense $SDMPT/home/biosense 1000 1000
-
-    # Copy etc files
     copy_and_set_ownership /home/agent/hostdir/files/etc $SDMPT/etc root root
-
-    # Copy usr/local files
     copy_and_set_ownership /home/agent/hostdir/files/usr/local $SDMPT/usr/local root root
-
-    # Copy var files
     copy_and_set_ownership /home/agent/hostdir/files/var/log $SDMPT/var/log 1000 1000
-
     logtoboth "Copied files to image"
-
     logtoboth "* Plugin $pfx: Complete Phase 0"
 
 elif [ "$phase" == "1" ]; then
-    #
-    # Phase 1 (in nspawn)
-    #
     logtoboth "* Plugin $pfx: Phase 1"
-
     if [ -f "/etc/wireguard/template.conf" ]; then
-        # Generate WireGuard keys
         mv /etc/wireguard/template.conf "/etc/wireguard/${WG_INTERFACE}.conf"
         umask 077
         wg genkey | tee /etc/wireguard/privatekey | wg pubkey >/etc/wireguard/publickey
-
         PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
         PUBLIC_KEY=$(cat /etc/wireguard/publickey)
-
-        # Update the client configuration
         sed -i "s|PrivateKey = .*|PrivateKey = ${PRIVATE_KEY}|" "/etc/wireguard/${WG_INTERFACE}.conf"
         sed -i "s|Address = .*|Address = ${wg_ip}/16|" "/etc/wireguard/${WG_INTERFACE}.conf"
-
-        # Generate the command to append to the server configuration
         plugin_addnote "On the server run: sudo wg set ${WG_INTERFACE} peer ${PUBLIC_KEY} persistent-keepalive 25 allowed-ips ${wg_ip}/32 "
     else
         logtoboth "template.conf not found in /etc/wireguard, skipping client configuration update"
     fi
-
-    raspi-config nonint do_change_locale C.UTF-8 &&
-        logtoboth "Set locale to C.UTF-8"
-
-    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' &&
-        logtoboth "Set keymap to Generic 104-key PC"
-
-    # Update the APN in the setup-modem.conf file
-    update_apn_config "$apn" "$APN_CONFIG_FILE"
-
-    # Create a virtual environment and install packages from requirements.txt
+    raspi-config nonint do_change_locale C.UTF-8 && logtoboth "Set locale to C.UTF-8"
+    raspi-config nonint do_configure_keyboard 'Generic 104-key PC' && logtoboth "Set keymap to Generic 104-key PC"
+    update_config_file "$apn" "$ip_address" "$gateway" "$APN_CONFIG_FILE"
     sudo -u biosense /home/biosense/python/setup-python
-
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
-
     echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
     echo "export LATITUDE" >>/etc/profile.d/geolocation.sh
     echo "LONGITUDE=${longitude}" >>/etc/profile.d/geolocation.sh
     echo "export LONGITUDE" >>/etc/profile.d/geolocation.sh
-
     logtoboth "Added latitude and longitude environment variables"
-
     logtoboth "* Plugin $pfx: Phase 1 completed"
 
 elif [ "$phase" == "post-install" ]; then
-    #
-    # Post-install edits
-    #
     logtoboth "* Plugin $pfx: Phase post-install"
-
     if [ "$edit_sshd_config" == "true" ]; then
-        # Edit sshd_config
-        echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config &&
-            echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
+        echo 'PasswordAuthentication no' >>/etc/ssh/sshd_config && echo 'ChallengeResponseAuthentication no' >>/etc/ssh/sshd_config &&
             logtoboth "Configured sshd_config"
     fi
-
-    # List of services to be enabled and started
     enable_services=(
         "wg-quick@${WG_INTERFACE}"
         "ups-monitor.service"
@@ -178,19 +125,12 @@ elif [ "$phase" == "post-install" ]; then
         "run-birdnet.service"
         "manage-disk-space.service"
         "compress-recordings.service"
-        "read-vegetronix"
+        "read-vegetronix.service"
     )
-
     for service in "${enable_services[@]}"; do
-        sudo systemctl enable "$service" &&
-            logtoboth "Enabled $service"
+        sudo systemctl enable "$service" && logtoboth "Enabled $service"
     done
-
-    # Set time zone to UTC for uniformity across clients
-    ln -b -f -s /usr/share/zoneinfo/UTC /etc/localtime &&
-        logtoboth "Set timezone to UTC" ||
-        logtoboth "Failed to set timezone to UTC"
-
+    ln -b -f -s /usr/share/zoneinfo/UTC /etc/localtime && logtoboth "Set timezone to UTC" || logtoboth "Failed to set timezone to UTC"
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi
 
