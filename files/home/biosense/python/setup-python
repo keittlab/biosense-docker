@@ -7,7 +7,7 @@ source /home/biosense/biosense_venv/bin/activate
 # Upgrade pip to the latest version
 pip install --upgrade pip
 
-# Install the specific version of numpy
+# For birdnetlib
 pip install "numpy<2"
 
 # Install wheel files
