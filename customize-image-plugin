@@ -38,26 +38,15 @@ copy_and_set_ownership() {
     fi
 }
 
-# Function to update APN, IP address, and optional gateway in /etc/biosense/setup-modem.conf
-update_config_file() {
-    local apn_value="$1"
-    local ip_value="$2"
-    local gateway_value="$3"
-    local config_file="$4"
+# Function to update /etc/biosense/setup-modem.conf based on sim_service
+update_modem_config() {
+    local sim_service="$1"
+    local config_file="$2"
 
     if [ -f "$config_file" ]; then
-        [ -n "$apn_value" ] && sed -i "s/^apn=.*/apn=$apn_value/" "$config_file" &&
-            logtoboth "Updated APN value to '$apn_value' in $config_file"
-        [ -n "$ip_value" ] && sed -i "s/^ip_address=.*/ip_address=$ip_value/" "$config_file" &&
-            logtoboth "Updated IP address to '$ip_value' in $config_file"
-
-        # Only update the gateway if a value is provided
-        if [ -n "$gateway_value" ]; then
-            sed -i "s/^gateway=.*/gateway=$gateway_value/" "$config_file" &&
-                logtoboth "Updated gateway to '$gateway_value' in $config_file"
-        else
-            logtoboth "Gateway not provided; skipping gateway configuration in $config_file"
-        fi
+        # Update the sim_service parameter in the config file
+        sed -i "s/^sim_service=.*/sim_service=$sim_service/" "$config_file" &&
+            logtoboth "Updated sim_service to '$sim_service' in $config_file"
     else
         logtoboth "Config file $config_file does not exist."
     fi
@@ -67,13 +56,13 @@ update_config_file() {
 phase=$1
 pfx="$(basename "$0")"
 args="$2"
-vldargs="|wg_ip|latitude|longitude|edit_sshd_config|apn|ip_address|gateway|"
+vldargs="|wg_ip|latitude|longitude|edit_sshd_config|sim_service|"
 reqargs="|wg_ip|latitude|longitude|"
 loadparams
 
 # Set the WireGuard interface name
 WG_INTERFACE="biosense"
-APN_CONFIG_FILE="/etc/biosense/setup-modem.conf"
+CONFIG_FILE="/etc/biosense/setup-modem.conf"
 
 # Extract arguments
 plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
@@ -83,7 +72,7 @@ if [ "$phase" == "0" ]; then
     plugin_getargs "$pfx" "$args" "$vldargs" "$reqargs" || exit
     plugin_printkeys
     mkdir -p $assetdir
-    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, apn=${apn}, ip_address=${ip_address}, gateway=${gateway}, edit_sshd_config=${edit_sshd_config}"
+    logtoboth "Plugin $pfx: wg_ip=${wg_ip}, latitude=${latitude}, longitude=${longitude}, sim_service=${sim_service}, edit_sshd_config=${edit_sshd_config}"
     copy_and_set_ownership /home/agent/hostdir/files/home/biosense $SDMPT/home/biosense 1000 1000
     copy_and_set_ownership /home/agent/hostdir/files/etc $SDMPT/etc root root
     copy_and_set_ownership /home/agent/hostdir/files/usr/local $SDMPT/usr/local root root
@@ -107,7 +96,10 @@ elif [ "$phase" == "1" ]; then
     fi
     raspi-config nonint do_change_locale C.UTF-8 && logtoboth "Set locale to C.UTF-8"
     raspi-config nonint do_configure_keyboard 'Generic 104-key PC' && logtoboth "Set keymap to Generic 104-key PC"
-    update_config_file "$apn" "$ip_address" "$gateway" "$APN_CONFIG_FILE"
+
+    # Update the configuration file based on the sim_service type, if specified
+    [ -n "$sim_service" ] && update_modem_config "$sim_service" "$CONFIG_FILE"
+
     sudo -u biosense /home/biosense/python/setup-python
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
     echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
@@ -131,8 +123,8 @@ elif [ "$phase" == "post-install" ]; then
         "manage-disk-space.service"
         "compress-recordings.service"
         "read-vegetronix.service"
+        "read-gps.service"
         "case-led.service"
-        "openvpn@us-east-1-client"
     )
     for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" && logtoboth "Enabled $service"

@@ -9,7 +9,7 @@ DISABLE_WIFI=0
 DISABLE_BLUETOOTH=0
 DISABLE_TRIGGERHAPPY=0
 DISABLE_SSH_PASSWORDS=0
-NO_BOOT_SCRIPTS=0 # New variable for --no-boot-scripts
+NO_BOOT_SCRIPTS=0
 WIFI_SSID=""
 WIFI_PASSWORD=""
 WG_IP=""
@@ -20,7 +20,7 @@ CONFIG_FILE=""
 SAVE_CONFIG_FILE=""
 UPDATE_CONFIG=0
 WAIT_TIMESYNC=0
-APN="" # Default APN is empty
+SIM_SERVICE=""
 
 # Function to display usage information
 usage() {
@@ -45,9 +45,7 @@ usage() {
     echo "  --latitude <latitude>          : Specify the latitude."
     echo "  --longitude <longitude>        : Specify the longitude."
     echo "  --wait-timesync                : Wait for time synchronization."
-    echo "  --apn <apn>                    : Specify the APN for the cellular network (default: empty)."
-    echo "  --sim-ip <ip_address>          : Specify a static IP for the cellular network."
-    echo "  --sim-gateway <gateway_ip>     : Specify the gateway for the static IP configuration."
+    echo "  --sim-service <service>        : Specify the SIM service provider (e.g., 1nce)."
     echo "  --no-boot-scripts              : Omit --bootscripts from the sdm command."
     exit 1
 }
@@ -137,19 +135,11 @@ while [[ "$#" -gt 0 ]]; do
         WAIT_TIMESYNC=1
         shift 1
         ;;
-    --apn)
-        APN=$2
+    --sim-service)
+        SIM_SERVICE=$2
         shift 2
         ;;
-    --sim-ip)
-        STATIC_IP=$2
-        shift 2
-        ;;
-    --sim-gateway)
-        GATEWAY=$2
-        shift 2
-        ;;
-    --no-boot-scripts) # New argument for --no-boot-scripts
+    --no-boot-scripts)
         NO_BOOT_SCRIPTS=1
         shift 1
         ;;
@@ -245,16 +235,9 @@ fi
 DISABLES="piwiz|${DISABLES}"
 
 # Add the necessary plugins to the SDM command
-PLUGIN_ARGS="wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}"
+PLUGIN_ARGS="wg_ip=${WG_IP}|latitude=${LATITUDE}|longitude=${LONGITUDE}|sim_service=${SIM_SERVICE}"
 [ -n "${WIFI_SSID}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifissid=${WIFI_SSID}"
 [ -n "${WIFI_PASSWORD}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|wifipassword=${WIFI_PASSWORD}"
-[ -n "${APN}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|apn=${APN}"                    # Add APN if provided
-[ -n "${STATIC_IP}" ] && PLUGIN_ARGS="${PLUGIN_ARGS}|ip_address=${STATIC_IP}" # Add IP address if provided
-
-# Add gateway only if provided, otherwise ignore it
-if [[ -n "${GATEWAY}" ]]; then
-    PLUGIN_ARGS="${PLUGIN_ARGS}|gateway=${GATEWAY}"
-fi
 
 # Remove trailing '|' and add PLUGIN_ARGS to SDM_COMMAND
 if [[ -n "${PLUGIN_ARGS}" ]]; then
