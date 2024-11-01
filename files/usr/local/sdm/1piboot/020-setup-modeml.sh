@@ -24,12 +24,11 @@ MODEM_INTERNAL_NAME=${MODEM_INTERNAL_NAME:-cdc-wdm0}
 # Set APN based on the service
 if [ "$SERVICE" = "1nce" ]; then
     APN="iot.1nce.net"
+    # Configure LTE connection with specified APN, interface, and internal modem name
+    nmcli c add type gsm ifname "$MODEM_IFACE" con-name "lte" \
+        connection.interface-name "$MODEM_INTERNAL_NAME" gsm.apn "$APN" ipv4.method auto
+    nmcli c up "lte" && echo "LTE interface is up" || echo "Failed to bring up LTE interface"
 else
     echo "Service $SERVICE is not supported by this script."
     exit 1
 fi
-
-# Configure LTE connection with specified APN, interface, and internal modem name
-nmcli c add type gsm ifname "$MODEM_IFACE" con-name "lte" \
-    connection.interface-name "$MODEM_INTERNAL_NAME" gsm.apn "$APN" ipv4.method auto
-nmcli c up "lte" && echo "LTE interface is up" || echo "Failed to bring up LTE interface"
