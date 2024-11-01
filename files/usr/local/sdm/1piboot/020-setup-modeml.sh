@@ -11,23 +11,37 @@ read_config() {
     local apn=""
     local ip_address=""
     local gateway=""
+    local vpn_host=""
+    local vpn_ip=""
     if [ -f "$CONFIG_FILE" ]; then
         apn=$(grep -i 'apn' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
         ip_address=$(grep -i 'ip_address' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
         gateway=$(grep -i 'gateway' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
+        vpn_host=$(grep -i 'vpn_host' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
+        vpn_ip=$(grep -i 'vpn_ip' "$CONFIG_FILE" | awk -F'=' '{print $2}' | xargs)
     fi
-    echo "$apn" "$ip_address" "$gateway"
+    echo "$apn" "$ip_address" "$gateway" "$vpn_host" "$vpn_ip"
 }
 
 # Detect the modem interface (e.g., wwan0)
 modem_iface=$(nmcli dev status | grep gsm | awk '{print $1}')
 
 # Read configuration values
-read -r APN IP_ADDRESS GATEWAY <<<$(read_config)
+read -r APN IP_ADDRESS GATEWAY VPN_HOST VPN_IP <<<$(read_config)
 
 # Check if APN is defined or empty
 if [ -z "$APN" ]; then
     echo "Warning: APN is not defined in $CONFIG_FILE"
+fi
+
+# Add VPN host to /etc/hosts if both VPN_HOST and VPN_IP are set
+if [ -n "$VPN_HOST" ] && [ -n "$VPN_IP" ]; then
+    if ! grep -q "$VPN_HOST" /etc/hosts; then
+        echo "$VPN_IP $VPN_HOST" | sudo tee -a /etc/hosts
+        echo "Added $VPN_HOST with IP $VPN_IP to /etc/hosts"
+    else
+        echo "$VPN_HOST is already in /etc/hosts"
+    fi
 fi
 
 if [ -n "$modem_iface" ]; then

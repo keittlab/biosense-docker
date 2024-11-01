@@ -13,3 +13,4 @@ sqlalchemy
 gpiod
 sparkfun-qwiic
 pynmea2
+RPi.GPIO
