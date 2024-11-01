@@ -33,11 +33,19 @@ fi
 if [ -n "$modem_iface" ]; then
     if [ -n "$APN" ]; then
         # Add LTE modem connection with either static IP or DHCP
-        if [ -n "$IP_ADDRESS" ] && [ -n "$GATEWAY" ]; then
+        if [ -n "$IP_ADDRESS" ]; then
             # Set up a static IP configuration
-            nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method manual ipv4.addresses "$IP_ADDRESS/24" ipv4.gateway "$GATEWAY" ipv4.dns "8.8.8.8,8.8.4.4" &&
-                echo "Added LTE modem connection with APN: $APN, static IP: $IP_ADDRESS, and gateway: $GATEWAY" ||
-                echo "Failed to add LTE modem connection with APN: $APN, static IP: $IP_ADDRESS, and gateway: $GATEWAY"
+            if [ -n "$GATEWAY" ]; then
+                # Configure with both static IP and gateway
+                nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method manual ipv4.addresses "$IP_ADDRESS/24" ipv4.gateway "$GATEWAY" ipv4.dns "8.8.8.8,8.8.4.4" &&
+                    echo "Added LTE modem connection with APN: $APN, static IP: $IP_ADDRESS, and gateway: $GATEWAY" ||
+                    echo "Failed to add LTE modem connection with APN: $APN, static IP: $IP_ADDRESS, and gateway: $GATEWAY"
+            else
+                # Configure with static IP only, no gateway
+                nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method manual ipv4.addresses "$IP_ADDRESS/24" ipv4.dns "8.8.8.8,8.8.4.4" &&
+                    echo "Added LTE modem connection with APN: $APN and static IP: $IP_ADDRESS (no gateway)" ||
+                    echo "Failed to add LTE modem connection with APN: $APN and static IP: $IP_ADDRESS (no gateway)"
+            fi
         else
             # Use DHCP if static IP and gateway are not provided
             nmcli c add type gsm ifname "$modem_iface" con-name lte connection.interface-name "$modem_iface" gsm.apn "$APN" ipv4.method auto &&
