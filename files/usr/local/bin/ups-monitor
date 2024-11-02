@@ -79,19 +79,18 @@ def main():
         pld_pin = config['DEFAULT'].get('PLD_PIN', 6)
         battery_low_threshold = config['DEFAULT'].get('BATTERY_LOW_THRESHOLD', 20)
         voltage_threshold = config['DEFAULT'].get('VOLTAGE_THRESHOLD', 3.20)
-        check_interval = config['DEFAULT'].get('CHECK_INTERVAL', 60)
+        check_interval = config['DEFAULT'].get('CHECK_INTERVAL', 120)
         shutdown_delay = config['DEFAULT'].get('SHUTDOWN_DELAY', 1)
         bus_number = config['DEFAULT'].get('BUS', 1)
         address = int(config['DEFAULT'].get('ADDRESS', "0x36"), 16)
         voltage_scale = config['DEFAULT'].get('VOLTAGE_SCALE', 1.0)
         capacity_scale = config['DEFAULT'].get('CAPACITY_SCALE', 1.0)
-        loop = config['DEFAULT'].get('LOOP', True)
 
         # BirdNET parameters
-        run_birdnet_capacity_resume = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_RESUME', 30)
-        run_birdnet_voltage_resume = config['DEFAULT'].get('BIRDN_VOLTAGE_RESUME', 3.50)
-        run_birdnet_capacity_stop = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_STOP', 15)
-        run_birdnet_voltage_stop = config['DEFAULT'].get('BIRDN_VOLTAGE_STOP', 3.30)
+        run_birdnet_capacity_resume = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_RESUME', 80)
+        run_birdnet_voltage_resume = config['DEFAULT'].get('BIRDN_VOLTAGE_RESUME', 3.7)
+        run_birdnet_capacity_stop = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_STOP', 30)
+        run_birdnet_voltage_stop = config['DEFAULT'].get('BIRDN_VOLTAGE_STOP', 3.4)
     except Exception as e:
         logging.error(f"Error parsing configuration: {e}")
         exit(1)
@@ -153,13 +152,24 @@ def main():
                         if capacity < battery_low_threshold or voltage < voltage_threshold:
                             failure_counter += 1
 
-                    # Only wait if not triggering shutdown
+                    if failure_counter >= shutdown_threshold:
+                        # Shutdown if critical thresholds are met
+                        shutdown_message = f"Critical battery condition met. Initiating shutdown in {shutdown_delay} minute(s)."
+                        logging.error(shutdown_message)
+                        call(f"nohup shutdown -h +{shutdown_delay} '{shutdown_message}' > /dev/null 2>&1", shell=True)
+                        shutdown_initiated = True
+                        break
+
                     if failure_counter < shutdown_threshold:
                         time.sleep(check_interval)
                     else:
                         break
                 except Exception as e:
                     logging.error(f"Error during monitoring loop: {e}")
+
+            if not loop:
+                break
+            time.sleep(check_interval)
     finally:
         exit(0)
 
