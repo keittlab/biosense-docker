@@ -130,6 +130,13 @@ elif [ "$phase" == "post-install" ]; then
     for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" && logtoboth "Enabled $service"
     done
+    disable_services=(
+        "avahi-daemon.service"
+        "nfs-common.service"
+    )
+    for service in "${disable_services[@]}"; do
+        sudo systemctl disable "$service" && logtoboth "Disabled $service"
+    done
     ln -b -f -s /usr/share/zoneinfo/UTC /etc/localtime && logtoboth "Set timezone to UTC" || logtoboth "Failed to set timezone to UTC"
     logtoboth "* Plugin $pfx: Phase post-install Completed"
 fi

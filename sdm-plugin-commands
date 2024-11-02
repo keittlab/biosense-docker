@@ -3,7 +3,7 @@ user:"deluser=pi"
 # need to add the --redact switch in full production
 user:"adduser=biosense|password=biosense"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#apps
-apps:"apps=wireguard,audacity,alsa-utils,sox,ffmpeg,libpython3-all-dev,i2c-tools,git,libpq-dev,sqlite3,sqlite3-tools,minicom,socat,libqmi-utils,udhcpc,openvpn"
+apps:"apps=wireguard,audacity,alsa-utils,sox,ffmpeg,libpython3-all-dev,i2c-tools,git,libpq-dev,sqlite3,sqlite3-tools,minicom,socat,libqmi-utils,udhcpc,gpsd,chrony,gpsd-clients"
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#disables
 # disable the startup configuration wizard
 # disables:piwiz
