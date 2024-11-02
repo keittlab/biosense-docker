@@ -128,53 +128,38 @@ def main():
                     logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), External Power State: {'Connected' if external_power_state == 1 else 'Disconnected'}, Voltage: {voltage:.2f}V")
 
                     if external_power_state == 1:
+                        # Reset shutdown counter and cancel any initiated shutdown if power is restored
                         if shutdown_initiated:
                             call("sudo shutdown -c", shell=True)
                             shutdown_initiated = False
                             logging.info("Shutdown canceled due to external power restored.")
                         failure_counter = 0
-                        # Check conditions to resume BirdNET service if it was stopped by this script
+                        # Resume BirdNET if it was previously stopped by this script
                         if birdnet_stopped_by_script and capacity > run_birdnet_capacity_resume and voltage > run_birdnet_voltage_resume:
                             call("systemctl start run-birdnet", shell=True)
                             logging.info("BirdNET service resumed")
-                            # Check if the flag file exists, indicating a potential issue
                             if os.path.exists(birdnet_flag_file):
-                                logging.error("Unexpected: BirdNET flag file exists despite service resumption. Removing flag file.")
                                 os.remove(birdnet_flag_file)  # Remove flag file to reset state
                             birdnet_stopped_by_script = False
                     else:
-                        # Check conditions to stop BirdNET service
-                        if capacity < run_birdnet_capacity_stop or voltage < run_birdnet_voltage_stop:
-                            if not birdnet_stopped_by_script:
-                                call("systemctl stop run-birdnet", shell=True)
-                                logging.info("BirdNET service stopped")
-                                birdnet_stopped_by_script = True
-                                with open(birdnet_flag_file, 'w') as f:
-                                    f.write("BirdNET service stopped by ups-monitor\n")  # Create flag file
-                        failure_counter += 1
+                        # Stop BirdNET if conditions are met
+                        if (capacity < run_birdnet_capacity_stop or voltage < run_birdnet_voltage_stop) and not birdnet_stopped_by_script:
+                            call("systemctl stop run-birdnet", shell=True)
+                            logging.info("BirdNET service stopped")
+                            birdnet_stopped_by_script = True
+                            with open(birdnet_flag_file, 'w') as f:
+                                f.write("BirdNET service stopped by ups-monitor\n")
+                        # Only increment failure_counter if battery is below shutdown thresholds
+                        if capacity < battery_low_threshold or voltage < voltage_threshold:
+                            failure_counter += 1
 
+                    # Only wait if not triggering shutdown
                     if failure_counter < shutdown_threshold:
                         time.sleep(check_interval)
                     else:
                         break
                 except Exception as e:
                     logging.error(f"Error during monitoring loop: {e}")
-
-            if failure_counter >= shutdown_threshold and not shutdown_initiated:
-                shutdown_reason = ""
-                if capacity < battery_low_threshold:
-                    shutdown_reason = "due to critical battery level."
-                elif voltage < voltage_threshold:
-                    shutdown_reason = "due to critical battery voltage."
-
-                shutdown_message = f"Critical condition met {shutdown_reason} Initiating shutdown."
-                logging.error(shutdown_message)
-                call(f"nohup shutdown -h +{shutdown_delay} '{shutdown_message}' > /dev/null 2>&1", shell=True)
-                shutdown_initiated = True
-
-            if not loop:
-                break
-            time.sleep(check_interval)
     finally:
         exit(0)
 
