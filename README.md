@@ -9,7 +9,7 @@ Here is an example:
 ./customize-image --wg-ip 10.123.1.42 
 ```
 
-The downloads the most recent RPi OS image in to `source_images`, copies the image into `customized_images` and modifies it. The file in `customized_images` can be burned to an sd or ssd drive using the RPi OS Imager application. The `--wg-ip` switch is required and sets the ip-number of the client in the vpn. It is also used to create the hostname of the device. Each device should have a unique ip-number, even if it is not on the internet. The network spaces is `10.123.0.0/16` meaning that the second two numbers can vary from 1-254.
+The downloads the most recent RPi OS image in to `source_images`, copies the image into `customized_images` and modifies it. The file in `customized_images` can be burned to an sd or ssd drive using the RPi OS Imager application. The `--wg-ip` switch is required and sets the ip-number of the client in the vpn. It is also used to create the hostname of the device. Each device should have a unique ip-number, even if it is not on the internet. The network spaces is `10.123.0.0/16` meaning that the second two numbers can vary from 1-254. Servers and other non-sensor devices use `10.123.0.1-254`, so sensors should be within `10.123.1.1 -- 10.123.254.254`. That permits many ip addresses.
 
 Currently, you need to:
 
