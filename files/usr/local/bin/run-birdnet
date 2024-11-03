@@ -3,12 +3,14 @@
 import os
 import sys
 import time
+import json
 import signal
 import shutil
 import re
 from datetime import datetime, timedelta
 import logging
 from logging.handlers import RotatingFileHandler
+import numpy as np
 
 from sqlalchemy import (
     create_engine,
@@ -32,9 +34,7 @@ from birdnetlib.analyzer import Analyzer
 # Configure logging
 log_dir = "/var/log/biosense/"
 log_file = os.path.join(log_dir, "run-birdnet.log")
-log_handler = RotatingFileHandler(
-    log_file, maxBytes=1 * 1024 * 1024, backupCount=5
-)  # 1 MB per file, 5 backup files
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
 logging.basicConfig(
     level=logging.INFO,
     handlers=[log_handler],
@@ -113,18 +113,13 @@ class Detection(Base):
     is_likely = Column(Boolean, nullable=True)
     source_recording = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
+    embedding = Column(String, nullable=True)
 
     __table_args__ = (
-        Index(
-            "idx_com_name_timestamp", "com_name", "timestamp"
-        ),  # Filter by species and date
-        Index(
-            "idx_start_end_time", "start_time", "end_time"
-        ),  # Range-based queries for overlapping records
-        Index(
-            "idx_com_name_confidence", "com_name", "confidence"
-        ),  # Quickly find lowest confidence by species
-        Index("idx_sci_name", "sci_name"),  # Index for scientific name
+        Index("idx_com_name_timestamp", "com_name", "timestamp"),
+        Index("idx_start_end_time", "start_time", "end_time"),
+        Index("idx_com_name_confidence", "com_name", "confidence"),
+        Index("idx_sci_name", "sci_name"),
     )
 
 
@@ -192,6 +187,7 @@ expected_columns = [
     "is_likely",
     "source_recording",
     "file_path",
+    "embedding",
 ]
 
 # Initialize database
@@ -283,43 +279,45 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
     if not os.path.exists(export_dir_partitioned):
         os.makedirs(export_dir_partitioned)
 
-    # Extract audio segments of detections using BirdNET's method
+    # Extract audio segments of detections
     recording.extract_detections_as_audio(directory=export_dir_partitioned)
 
-    # Process each detection segment
+    # Extract embeddings for the recording
+    recording.extract_embeddings()  # This will populate `recording.embeddings`
+
     for detection in recording.detections:
         old_segment_filename = detection["extracted_audio_path"]
-
-        # Determine the new segment filename path
         new_segment_filename = os.path.join(
             export_dir_partitioned, os.path.basename(old_segment_filename)
         )
 
+        # Handle file deletion for human vocal detection
         if not old_segment_filename or not os.path.exists(old_segment_filename):
-            logging.error(
-                f"Extracted file not found or is None: {old_segment_filename}"
-            )
             new_segment_filename = None  # Set to None to log as NULL in SQLite
         else:
-            # Check if the detected sound is human vocal
             if detection.get("common_name") == "Human vocal":
-                # If human voice is detected, delete the segment file and set filename to None
                 try:
                     os.remove(old_segment_filename)
-                    logging.info(
-                        f"Deleted human vocal segment file: {old_segment_filename}"
-                    )
-                    new_segment_filename = None  # Set to None to log as NULL in SQLite
+                    new_segment_filename = None
                 except Exception as e:
                     logging.error(
                         f"Error deleting human vocal file {old_segment_filename}: {e}"
                     )
             else:
-                # Move the non-human voice segment to the new location
                 shutil.move(old_segment_filename, new_segment_filename)
-                logging.debug(f"Extracted segment: {new_segment_filename}")
 
-        # Save detection to the database
+        # Retrieve corresponding embedding if available
+        embedding = next(
+            (
+                emb["embeddings"]
+                for emb in recording.embeddings
+                if emb["start_time"] == detection["start_time"]
+            ),
+            None,
+        )
+        embedding_json = json.dumps(embedding) if embedding else None
+
+        # Save detection data to the database
         detection_data = Detection(
             hostname=HOSTNAME,
             latitude=LATITUDE,
@@ -332,15 +330,14 @@ def extract_detected_segments(recording, recording_timestamp, source_recording_p
             confidence=detection["confidence"],
             is_likely=detection["is_predicted_for_location_and_date"],
             source_recording=source_recording_path,
-            file_path=new_segment_filename,  # This will be NULL in the database if None
+            file_path=new_segment_filename,
+            embedding=embedding_json,  # Store embedding as JSON
         )
+
         try:
-            logging.debug(
-                f"Attempting to write detection to database: {detection_data}"
-            )
             session.add(detection_data)
             session.commit()
-            logging.debug("Detection written to database successfully.")
+            logging.debug("Detection with embedding written to database successfully.")
         except Exception as e:
             logging.error(f"Error writing to database: {e}")
             session.rollback()
