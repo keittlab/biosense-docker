@@ -10,28 +10,48 @@ import subprocess
 import sqlite3
 import toml
 import sys
+import argparse
+from datetime import datetime, timedelta
+
 
 # Load configuration
-config = toml.load('/etc/biosense/manage-disk-space.conf')
-
-# Configure logging
-log_dir = '/var/log/biosense/'
-log_file = os.path.join(log_dir, 'manage-disk-space.log')
-log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
-logging.basicConfig(level=logging.INFO, handlers=[log_handler],
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+config = toml.load("/etc/biosense/manage-disk-space.conf")
 
 # Thresholds for disk usage
-DISK_USAGE_WARNING_THRESHOLD = config['thresholds']['warning']
-DISK_USAGE_CLEANUP_THRESHOLD = config['thresholds']['cleanup']
-DISK_USAGE_STOP_SERVICES_THRESHOLD = config['thresholds']['stop_services']
-DISK_USAGE_STOP_CLEANUP_THRESHOLD = config['thresholds']['stop_cleanup']
+DISK_USAGE_WARNING_THRESHOLD = config["thresholds"]["warning"]
+DISK_USAGE_CLEANUP_THRESHOLD = config["thresholds"]["cleanup"]
+DISK_USAGE_STOP_SERVICES_THRESHOLD = config["thresholds"]["stop_services"]
+DISK_USAGE_STOP_CLEANUP_THRESHOLD = config["thresholds"]["stop_cleanup"]
 
 # Services to manage
-SERVICES = config['services']['list']
+SERVICES = config["services"]["list"]
 
 # Database path
-DB_PATH = config['database']['path']
+DB_PATH = config["database"]["path"]
+
+# Paths to monitor
+RESULTS_DIR = "/home/biosense/datastore/sound_analysis_results"
+PROCESSED_DIR = "/home/biosense/datastore/processed_recordings"
+
+
+def configure_logging(dry_run):
+    """Configure logging to output to stdout if dry run, otherwise to file."""
+    log_level = logging.DEBUG if dry_run else logging.INFO
+    handler = (
+        logging.StreamHandler(sys.stdout)
+        if dry_run
+        else RotatingFileHandler(
+            "/var/log/biosense/manage-disk-space.log",
+            maxBytes=1 * 1024 * 1024,
+            backupCount=5,
+        )
+    )
+    logging.basicConfig(
+        level=log_level,
+        handlers=[handler],
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+
 
 def check_disk_usage(path):
     total, used, free = shutil.disk_usage(path)
@@ -39,32 +59,153 @@ def check_disk_usage(path):
     logging.info(f"Disk usage for {path}: {percent_used:.2f}% used")
     return percent_used
 
-def database_exists_and_has_schema(conn):
-    try:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(birdnet_detections)")
-        columns = cursor.fetchall()
-        return len(columns) > 0
-    except Exception as e:
-        logging.error(f"Error checking database schema: {e}")
-        return False
 
-def delete_random_recording_from_db():
-    if not os.path.isfile(DB_PATH):
-        logging.warning(f"Database file not found: {DB_PATH}. Skipping deletion.")
-        return
-
+def get_most_frequent_com_name():
     try:
         conn = sqlite3.connect(DB_PATH)
-        if not database_exists_and_has_schema(conn):
-            logging.warning("Database does not have the expected schema. Skipping deletion.")
-            conn.close()
-            return
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT com_name, COUNT(*) AS freq FROM birdnet_detections GROUP BY com_name ORDER BY freq DESC LIMIT 1"
+        )
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result else None
+    except Exception as e:
+        logging.error(f"Error querying most frequent com_name: {e}")
+        return None
 
+
+def delete_lowest_confidence_record_by_com_name(com_name, dry_run=False):
+    """Select and delete the lowest confidence record associated with the specified com_name that overlaps a random selection on the same date and interval."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # Get a random source_recording
-        cursor.execute("SELECT DISTINCT source_recording FROM birdnet_detections WHERE source_recording IS NOT NULL")
+        # Step 1: Select a random record with the specified com_name
+        cursor.execute(
+            "SELECT id, source_recording, start_time, end_time, confidence, timestamp FROM birdnet_detections "
+            "WHERE com_name = ? AND source_recording IS NOT NULL",
+            (com_name,),
+        )
+        records = cursor.fetchall()
+
+        if records:
+            # Randomly select one record
+            selected_record = random.choice(records)
+            (
+                selected_id,
+                source_recording,
+                start_time,
+                end_time,
+                confidence,
+                timestamp,
+            ) = selected_record
+
+            # Calculate absolute start and end times, accounting for cross-midnight wrap
+            timestamp_dt = datetime.fromisoformat(timestamp)
+            record_start_time = timestamp_dt + timedelta(seconds=start_time)
+            record_end_time = timestamp_dt + timedelta(seconds=end_time)
+
+            # Handle wrap-over by adjusting end time if it crosses midnight
+            if record_end_time.date() > record_start_time.date():
+                logging.debug("Detected cross-midnight recording interval.")
+                record_end_time = record_end_time.replace(day=record_start_time.day)
+
+            # Log the selected record details for debugging
+            logging.debug(
+                f"Selected record ID: {selected_id}, Source: {source_recording}, "
+                f"Start time: {start_time} (Absolute: {record_start_time}), "
+                f"End time: {end_time} (Absolute: {record_end_time}), Confidence: {confidence}"
+            )
+
+            # Step 2: Find all overlapping records with the same com_name, allowing for date boundary
+            cursor.execute(
+                "SELECT id, source_recording, confidence, start_time, end_time, timestamp FROM birdnet_detections "
+                "WHERE com_name = ? AND source_recording IS NOT NULL "
+                "AND datetime(timestamp, '+' || start_time || ' seconds') < ? "
+                "AND datetime(timestamp, '+' || end_time || ' seconds') > ?",
+                (com_name, record_end_time, record_start_time),
+            )
+            overlapping_records = cursor.fetchall()
+
+            # Print out all overlapping records for verification
+            logging.debug(f"Overlapping records for com_name '{com_name}':")
+            for overlap in overlapping_records:
+                (
+                    overlap_id,
+                    overlap_source_recording,
+                    overlap_confidence,
+                    overlap_start_time,
+                    overlap_end_time,
+                    overlap_timestamp,
+                ) = overlap
+                overlap_start_abs = datetime.fromisoformat(
+                    overlap_timestamp
+                ) + timedelta(seconds=overlap_start_time)
+                overlap_end_abs = datetime.fromisoformat(overlap_timestamp) + timedelta(
+                    seconds=overlap_end_time
+                )
+                logging.debug(
+                    f"Record ID: {overlap_id}, Source: {overlap_source_recording}, Confidence: {overlap_confidence}, "
+                    f"Start time: {overlap_start_time} (Absolute: {overlap_start_abs}), "
+                    f"End time: {overlap_end_time} (Absolute: {overlap_end_abs}), Timestamp: {overlap_timestamp}"
+                )
+
+            # Step 3: Select the lowest-confidence overlapping record
+            if overlapping_records:
+                lowest_confidence_record = min(overlapping_records, key=lambda x: x[2])
+                overlap_id, overlap_source_recording, overlap_confidence = (
+                    lowest_confidence_record[:3]
+                )
+                logging.info(
+                    f"Deleting lowest-confidence overlapping record: {overlap_source_recording} (Confidence: {overlap_confidence})"
+                )
+
+                # Delete the lowest confidence overlapping record
+                if not dry_run:
+                    cursor.execute(
+                        "UPDATE birdnet_detections SET source_recording = NULL WHERE id = ?",
+                        (overlap_id,),
+                    )
+                    conn.commit()
+
+                file_path = os.path.join(RESULTS_DIR, overlap_source_recording)
+                if os.path.isfile(file_path):
+                    logging.info(f"Deleting recording file: {file_path}")
+                    if not dry_run:
+                        os.remove(file_path)
+                else:
+                    logging.warning(f"File not found for deletion: {file_path}")
+            else:
+                logging.warning("No overlapping records found to delete.")
+
+        else:
+            logging.warning(f"No recordings found for com_name: {com_name}")
+
+        conn.close()
+    except Exception as e:
+        logging.error(
+            f"Error handling database and file deletion for com_name {com_name}: {e}"
+        )
+
+
+def delete_from_results_dir(dry_run=False):
+    """Delete a file from the sound_analysis_results directory, focusing on the most frequent com_name."""
+    com_name = get_most_frequent_com_name()
+    if com_name:
+        delete_lowest_confidence_record_by_com_name(com_name, dry_run)
+    else:
+        logging.warning("No common name found for deletion in results directory.")
+
+
+def delete_random_recording_from_processed(dry_run=False):
+    """Delete a random recording from the processed_recordings directory."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT source_recording FROM birdnet_detections WHERE source_recording IS NOT NULL"
+        )
         source_recordings = cursor.fetchall()
 
         if not source_recordings:
@@ -74,70 +215,141 @@ def delete_random_recording_from_db():
 
         source_recording_to_delete = random.choice(source_recordings)[0]
 
-        # Update all entries with the selected source_recording
-        cursor.execute("UPDATE birdnet_detections SET source_recording = NULL WHERE source_recording = ?", (source_recording_to_delete,))
-        conn.commit()
-        logging.debug(f"Updated database: set source_recording to NULL for source_recording: {source_recording_to_delete}")
+        logging.info(
+            f"Setting source_recording to NULL for {source_recording_to_delete}"
+        )
+        if not dry_run:
+            cursor.execute(
+                "UPDATE birdnet_detections SET source_recording = NULL WHERE source_recording = ?",
+                (source_recording_to_delete,),
+            )
+            conn.commit()
 
-        # Remove the associated file if it exists
-        if os.path.isfile(source_recording_to_delete):
-            os.remove(source_recording_to_delete)
-            logging.info(f"Deleted source recording file: {source_recording_to_delete}")
+        file_path = os.path.join(PROCESSED_DIR, source_recording_to_delete)
+        if os.path.isfile(file_path):
+            logging.info(f"Deleting source recording file: {file_path}")
+            if not dry_run:
+                os.remove(file_path)
         else:
-            logging.warning(f"Source recording file to delete not found: {source_recording_to_delete}")
+            logging.warning(f"Source recording file to delete not found: {file_path}")
 
         conn.close()
     except Exception as e:
         logging.error(f"Error handling database and file deletion: {e}")
 
-def stop_services():
-    for service in SERVICES:
-        try:
-            subprocess.run(['sudo', 'systemctl', 'stop', service], check=True)
-            logging.info(f"Stopped service: {service}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Error stopping service {service}: {e}")
 
-def start_services():
-    for service in SERVICES:
-        try:
-            subprocess.run(['sudo', 'systemctl', 'start', service], check=True)
-            logging.info(f"Started service: {service}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Error starting service {service}: {e}")
+def get_directory_size(path):
+    """Get the total size of a directory using 'du' command for faster execution."""
+    try:
+        # Run `du -sb <directory>` to get the size in bytes
+        output = subprocess.check_output(["du", "-sb", path]).split()[0].decode("utf-8")
+        total_size = int(output)
+        return total_size
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error calculating size of {path}: {e}")
+        return 0
 
-def main():
-    path_to_monitor = '/home/biosense'
+
+def manage_disk_space(dry_run=False):
+    results_usage = get_directory_size(RESULTS_DIR)
+    processed_usage = get_directory_size(PROCESSED_DIR)
+
+    if results_usage > processed_usage:
+        logging.info("Deleting files from sound_analysis_results.")
+        delete_from_results_dir(dry_run)
+    else:
+        logging.info("Deleting files from processed_recordings.")
+        delete_random_recording_from_processed(dry_run)
+
+
+def stop_services(dry_run=False):
+    for service in SERVICES:
+        logging.info(f"Stopping service: {service}")
+        if not dry_run:
+            try:
+                subprocess.run(["sudo", "systemctl", "stop", service], check=True)
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Error stopping service {service}: {e}")
+
+
+def start_services(dry_run=False):
+    for service in SERVICES:
+        logging.info(f"Starting service: {service}")
+        if not dry_run:
+            try:
+                subprocess.run(["sudo", "systemctl", "start", service], check=True)
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Error starting service {service}: {e}")
+
+
+def main(dry_run=False, simulated_usage=None):
+    path_to_monitor = "/home/biosense"
     services_stopped = False
 
-    # Log when the script starts
     logging.info("Script started.")
 
     try:
         while True:
-            percent_used = check_disk_usage(path_to_monitor)
-            
+            percent_used = (
+                simulated_usage
+                if simulated_usage is not None
+                else check_disk_usage(path_to_monitor)
+            )
+
             if percent_used > DISK_USAGE_WARNING_THRESHOLD:
-                logging.warning(f"Disk usage for {path_to_monitor} exceeded warning threshold: {percent_used:.2f}% used")
-            
-            if percent_used > DISK_USAGE_STOP_SERVICES_THRESHOLD and not services_stopped:
-                logging.warning(f"Disk usage for {path_to_monitor} exceeded stop services threshold: {percent_used:.2f}% used")
-                stop_services()
+                logging.warning(
+                    f"Disk usage for {path_to_monitor} exceeded warning threshold: {percent_used:.2f}% used"
+                )
+
+            if (
+                percent_used > DISK_USAGE_STOP_SERVICES_THRESHOLD
+                and not services_stopped
+            ):
+                logging.warning(
+                    f"Disk usage for {path_to_monitor} exceeded stop services threshold: {percent_used:.2f}% used"
+                )
+                stop_services(dry_run)
                 services_stopped = True
-            
+
             if percent_used > DISK_USAGE_CLEANUP_THRESHOLD:
-                logging.warning(f"Disk usage for {path_to_monitor} exceeded cleanup threshold: {percent_used:.2f}% used")
-                delete_random_recording_from_db()
-                percent_used = check_disk_usage(path_to_monitor)
+                logging.warning(
+                    f"Disk usage for {path_to_monitor} exceeded cleanup threshold: {percent_used:.2f}% used"
+                )
+                manage_disk_space(dry_run)
+                percent_used = (
+                    simulated_usage
+                    if simulated_usage is not None
+                    else check_disk_usage(path_to_monitor)
+                )
+
+                # Prevent infinite loop in dry-run mode
                 while percent_used > DISK_USAGE_STOP_CLEANUP_THRESHOLD:
-                    delete_random_recording_from_db()
-                    percent_used = check_disk_usage(path_to_monitor)
-                    time.sleep(1)  # Short delay to allow the system to update disk usage
-            
+                    manage_disk_space(dry_run)
+                    percent_used = (
+                        simulated_usage
+                        if simulated_usage is not None
+                        else check_disk_usage(path_to_monitor)
+                    )
+                    if dry_run:
+                        logging.info(
+                            "Dry run mode enabled, exiting cleanup loop to prevent infinite loop."
+                        )
+                        break  # Exit the loop in dry-run mode to avoid infinite loop
+                    time.sleep(1)  # Short delay to allow system update
+
             if services_stopped and percent_used < DISK_USAGE_STOP_CLEANUP_THRESHOLD:
-                logging.info(f"Disk usage for {path_to_monitor} below start services threshold: {percent_used:.2f}% used")
-                start_services()
+                logging.info(
+                    f"Disk usage for {path_to_monitor} below start services threshold: {percent_used:.2f}% used"
+                )
+                start_services(dry_run)
                 services_stopped = False
+
+            # In dry-run mode, exit after the first pass to avoid looping indefinitely
+            if dry_run:
+                logging.info(
+                    "Dry run mode enabled, exiting main loop after first pass."
+                )
+                break
 
             time.sleep(600)  # Check every 10 minutes
 
@@ -148,5 +360,20 @@ def main():
     finally:
         logging.info("Script stopped.")
 
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Manage disk space on the biosense system."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Enable dry run mode (no deletions or state changes).",
+    )
+    parser.add_argument(
+        "--percent-used", type=float, help="Simulate a specific disk usage percentage."
+    )
+    args = parser.parse_args()
+
+    configure_logging(args.dry_run)
+    main(dry_run=args.dry_run, simulated_usage=args.percent_used)
