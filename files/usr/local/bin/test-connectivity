@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+
+import os
+import time
+import toml
+import subprocess
+from logging.handlers import RotatingFileHandler
+import logging
+
+# Configure directories
+log_dir = '/var/log/biosense'
+data_dir = '/var/lib/biosense'
+os.makedirs(log_dir, exist_ok=True)
+os.makedirs(data_dir, exist_ok=True)
+
+# Configure logging
+log_file = os.path.join(log_dir, 'test-connectivity.log')
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)  # 1 MB per file, 5 backups
+logging.basicConfig(level=logging.INFO, handlers=[log_handler],
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Reboot count file
+reboot_count_file = os.path.join(data_dir, 'reboot_count.txt')
+
+# Load configuration settings
+config_file = '/etc/biosense/test-connectivity.conf'
+config = toml.load(config_file)
+
+# Server and connectivity check configurations
+SERVER_IP = config.get("SERVER_IP", "10.123.0.1")
+SSH_PORT = config.get("SSH_PORT", 22)
+WIREGUARD_INTERFACE = config.get("WIREGUARD_INTERFACE", "wg-quick@biosense")
+REBOOT_DELAY = config.get("REBOOT_DELAY", 86400)  # Reboot if no success in this interval
+REBOOT_LIMIT = config.get("REBOOT_LIMIT", 3)  # Maximum number of reboots allowed
+INITIAL_INTERVAL = config.get("INITIAL_INTERVAL", 3600)
+current_interval = INITIAL_INTERVAL
+
+def read_reboot_count():
+    """Read the reboot count from a file."""
+    try:
+        if os.path.exists(reboot_count_file):
+            with open(reboot_count_file, 'r') as f:
+                return int(f.read().strip())
+        return 0
+    except Exception as e:
+        logging.error(f"Error reading reboot count: {e}")
+        return 0
+
+def write_reboot_count(count):
+    """Write the reboot count to a file."""
+    try:
+        with open(reboot_count_file, 'w') as f:
+            f.write(str(count))
+    except Exception as e:
+        logging.error(f"Error writing reboot count: {e}")
+
+def check_ssh_connectivity():
+    """Check if SSH connectivity to the server is available."""
+    try:
+        result = subprocess.call(['nc', '-z', '-v', SERVER_IP, str(SSH_PORT)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return result == 0
+    except Exception as e:
+        logging.error(f"Error during SSH connectivity check: {e}")
+        return False
+
+def main():
+    logging.info("Configuration file loaded")
+    reboot_count = read_reboot_count()
+    last_success_time = time.time()
+
+    while True:
+        time.sleep(current_interval)
+        time_since_last_success = time.time() - last_success_time
+    
+        if check_ssh_connectivity():
+            last_success_time = time.time()
+            current_interval = INITIAL_INTERVAL
+            reboot_count = 0
+            write_reboot_count(reboot_count)
+            logging.info("SSH connectivity success. Resetting interval and reboot count.")
+        else:
+            logging.info("Restarting WireGuard interface.")
+            subprocess.call(['sudo', 'systemctl', 'restart', WIREGUARD_INTERFACE])
+            time.sleep(30)
+
+            if not check_ssh_connectivity() and time_since_last_success >= REBOOT_DELAY:
+                if reboot_count < REBOOT_LIMIT:
+                    reboot_count += 1
+                    write_reboot_count(reboot_count)
+                    logging.error(f"Initiating system reboot due to sustained connectivity loss. Reboot count: {reboot_count}")
+                    subprocess.call(['sudo', 'reboot'])
+                else:
+                    logging.error("Maximum reboot limit reached. Halting further actions.")
+                    break
+
+        current_interval *= 2
+        logging.info(f"Next check in {current_interval} seconds.")
+
+if __name__ == "__main__":
+    main()
