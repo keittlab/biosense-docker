@@ -73,16 +73,6 @@ def action_required(session):
     return total_count > 0 and success_count == 0
 
 
-def restart_wireguard():
-    try:
-        subprocess.run(
-            ["sudo", "systemctl", "restart", "wg-quick@biosense"], check=True
-        )
-        logging.info("WireGuard service restarted successfully.")
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to restart WireGuard service: {e}")
-
-
 def ssh_sessions_active():
     result = subprocess.run(["ss", "-tnp"], capture_output=True, text=True)
     return ":22" in result.stdout
