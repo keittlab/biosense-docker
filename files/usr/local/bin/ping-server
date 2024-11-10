@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import logging
+from time import sleep
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, DateTime, Boolean, String, Float
+from sqlalchemy.orm import declarative_base, sessionmaker
+import toml
+import subprocess
+from logging.handlers import RotatingFileHandler
+import signal
+
+# Configure logging
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "ping-server.log")
+os.makedirs(log_dir, exist_ok=True)
+
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+# SQLAlchemy setup
+Base = declarative_base()
+
+
+class PingData(Base):
+    __tablename__ = "ping_data"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hostname = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    success = Column(Boolean)
+
+
+def get_engine(db_path):
+    return create_engine(f"sqlite:///{db_path}")
+
+
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+
+def load_config(config_file):
+    try:
+        with open(config_file, "r") as f:
+            config = toml.load(f)
+
+        # Ensure required config values exist
+        if "DEFAULT" not in config or "SERVER_ADDRESS" not in config["DEFAULT"]:
+            logging.error("Missing required configuration fields in config file.")
+            sys.exit(1)
+
+        return config
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
+
+def ping_server(address, ping_count, ping_wait):
+    try:
+        result = subprocess.run(
+            ["ping", "-c", str(ping_count), "-W", str(ping_wait), address],
+            capture_output=True,
+            text=True,
+        )
+        # Only log stdout if ping fails
+        if result.returncode != 0:
+            logging.error(f"Ping output: {result.stdout}")
+        return result.returncode == 0
+    except Exception as e:
+        logging.error(f"Ping failed: {e}")
+        return False
+
+
+def handle_signal(signum, frame):
+    logging.info(f"Received signal {signum}, performing cleanup")
+    sys.exit(0)
+
+
+def main():
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    config_file = "/etc/biosense/ping-server.conf"
+    config = load_config(config_file)
+
+    interval = int(config["DEFAULT"].get("INTERVAL", 3600))
+    db_path = config["DEFAULT"].get(
+        "DB_PATH", "/home/biosense/datastore/ping_server.db"
+    )
+    server_address = config["DEFAULT"]["SERVER_ADDRESS"]
+    ping_count = int(config["DEFAULT"].get("PING_COUNT", 10))
+    ping_wait = int(config["DEFAULT"].get("PING_WAIT", 30))
+
+    # Retrieve latitude and longitude from environment variables, with fallback to 0.0 if invalid
+    try:
+        latitude = float(os.getenv("LATITUDE", "0.0"))
+        longitude = float(os.getenv("LONGITUDE", "0.0"))
+    except ValueError:
+        latitude, longitude = 0.0, 0.0
+        logging.warning(
+            "Invalid LATITUDE or LONGITUDE environment variable; defaulting to 0.0 for both."
+        )
+
+    hostname = os.uname().nodename.replace("-", "_")
+
+    # Initialize the database engine and session
+    engine = get_engine(db_path)
+    session = create_session(engine)
+    Base.metadata.create_all(engine)  # Create tables if not present
+
+    logging.info(
+        f"Pinging {server_address} every {interval} seconds with {ping_count} pings (wait {ping_wait}s each)"
+    )
+
+    while True:
+        success = ping_server(server_address, ping_count, ping_wait)
+        timestamp = datetime.utcnow()
+
+        # Log to the database
+        new_ping = PingData(
+            hostname=hostname,
+            latitude=latitude,
+            longitude=longitude,
+            timestamp=timestamp,
+            success=success,
+        )
+        session.add(new_ping)
+        session.commit()
+
+        # Log to the logfile
+        logging.info(
+            f"Pinged {server_address} at {timestamp} - Success: {success} "
+            f"Host: {hostname}, Lat: {latitude}, Lon: {longitude}"
+        )
+
+        sleep(interval)
+
+
+if __name__ == "__main__":
+    main()
