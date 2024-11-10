@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import logging
+from datetime import datetime, timedelta
+from sqlalchemy import create_engine, Column, Integer, DateTime, Boolean, String, Float
+from sqlalchemy.orm import declarative_base, sessionmaker
+import toml
+import subprocess
+from logging.handlers import RotatingFileHandler
+import random
+
+# Configure logging
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "weekly-connectivity-check.log")
+os.makedirs(log_dir, exist_ok=True)
+
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+Base = declarative_base()
+
+
+class PingData(Base):
+    __tablename__ = "ping_data"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hostname = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    success = Column(Boolean)
+
+
+def get_engine(db_path):
+    return create_engine(f"sqlite:///{db_path}")
+
+
+def create_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session  # Return the session factory itself
+
+
+def load_db_path():
+    config_file = "/etc/biosense/ping-server.conf"
+    try:
+        with open(config_file, "r") as f:
+            config = toml.load(f)
+        db_path = config["DEFAULT"].get(
+            "DB_PATH", "/home/biosense/datastore/ping_data.db"
+        )
+        return db_path
+    except Exception as e:
+        logging.error(f"Error reading ping-server configuration file: {e}")
+        sys.exit(1)
+
+
+def action_required(session):
+    # Calculate the earliest timestamp for the 7-day interval to check
+    time_threshold = datetime.utcnow() - timedelta(weeks=1)
+
+    # Query the database for total pings within the interval
+    total_count = (
+        session.query(PingData).filter(PingData.timestamp >= time_threshold).count()
+    )
+
+    # Query the database for successful pings within the interval
+    success_count = (
+        session.query(PingData)
+        .filter(PingData.timestamp >= time_threshold, PingData.success == True)
+        .count()
+    )
+
+    return total_count > 0 and success_count == 0
+
+
+def ssh_sessions_active():
+    result = subprocess.run(["ss", "-tnp"], capture_output=True, text=True)
+    return ":22" in result.stdout
+
+
+def reboot():
+    if ssh_sessions_active():
+        logging.info("Active SSH sessions detected; skipping reboot.")
+    else:
+        try:
+            # Set a random delay between 1 and 60 minutes
+            delay_minutes = random.randint(10, 12 * 60)
+            logging.info(f"System will reboot in {delay_minutes} minute(s).")
+            subprocess.run(
+                ["sudo", "shutdown", f"+{delay_minutes}", "reboot"], check=True
+            )
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Scheduled reboot failed: {e}")
+
+
+def main():
+    db_path = load_db_path()
+    engine = get_engine(db_path)
+    Session = create_session(engine)  # Get the session factory
+    session = Session()  # Call the factory to create a new session
+
+    # Check for successful pings within the last week
+    if action_required(session):
+        logging.warning(
+            "No successful pings detected in the last week, initiating reboot."
+        )
+        reboot()
+    else:
+        logging.info(
+            "Successful pings detected within the last week; no action required."
+        )
+
+    # Close the session
+    session.close()
+
+
+if __name__ == "__main__":
+    main()
