@@ -54,9 +54,14 @@ def load_db_path():
         sys.exit(1)
 
 
-def check_successful_pings(session):
+def wireguard_needs_restart(session):
     # Calculate the earliest timestamp for the 24-hour interval to check
     time_threshold = datetime.utcnow() - timedelta(hours=24)
+
+    # Query the database for total pings within the interval
+    total_count = (
+        session.query(PingData).filter(PingData.timestamp >= time_threshold).count()
+    )
 
     # Query the database for successful pings within the interval
     success_count = (
@@ -65,7 +70,7 @@ def check_successful_pings(session):
         .count()
     )
 
-    return success_count > 0  # Returns True if there are successful pings
+    return total_count > 0 and success_count == 0
 
 
 def restart_wireguard():
@@ -84,7 +89,7 @@ def main():
     session = create_session(engine)()
 
     # Check for successful pings within the last 24 hours
-    if not check_successful_pings(session):
+    if wireguard_needs_restart(session):
         logging.warning(
             "No successful pings detected in the last 24 hours, restarting WireGuard."
         )
