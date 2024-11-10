@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Daily Connectivity Check
+
+[Timer]
+OnBootSec=24h
+OnUnitActiveSec=24h
+
+[Install]
+WantedBy=timers.target
