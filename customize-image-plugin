@@ -128,6 +128,7 @@ elif [ "$phase" == "post-install" ]; then
         "case-led.service"
         "ping-server.service"
         "daily-connectivity-check.timer"
+        "weekly-connectivity-check.timer"
     )
     for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" && logtoboth "Enabled $service"
