@@ -92,9 +92,7 @@ def main():
     config = load_config(config_file)
 
     interval = int(config["DEFAULT"].get("INTERVAL", 3600))
-    db_path = config["DEFAULT"].get(
-        "DB_PATH", "/home/biosense/datastore/ping_server.db"
-    )
+    db_path = config["DEFAULT"].get("DB_PATH", "/home/biosense/datastore/ping_data.db")
     server_address = config["DEFAULT"]["SERVER_ADDRESS"]
     ping_count = int(config["DEFAULT"].get("PING_COUNT", 10))
     ping_wait = int(config["DEFAULT"].get("PING_WAIT", 30))
