@@ -37,7 +37,7 @@ def get_engine(db_path):
 
 def create_session(engine):
     Session = sessionmaker(bind=engine)
-    return Session()
+    return Session  # Return the session factory itself, which is callable
 
 
 def load_db_path():
@@ -92,7 +92,8 @@ def restart_networking():
 def main():
     db_path = load_db_path()
     engine = get_engine(db_path)
-    session = create_session(engine)()
+    Session = create_session(engine)  # Get the session factory
+    session = Session()  # Call the factory to create a new session
 
     # Check for successful pings within the last 24 hours
     if action_required(session):
