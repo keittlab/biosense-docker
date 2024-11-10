@@ -364,8 +364,8 @@ def analyze_recordings():
 
         for filename in flac_files:
             filepath = os.path.join(RECORDING_DIR, filename)
-            # Check if the file has not been modified in the last 900 seconds (15 minutes)
-            if current_time - os.path.getmtime(filepath) < 900:
+            # Check if the file has not been modified in the last 300 seconds (5 minutes)
+            if current_time - os.path.getmtime(filepath) < 300:
                 logging.info(f"Skipping recent file: {filepath}")
                 continue
 

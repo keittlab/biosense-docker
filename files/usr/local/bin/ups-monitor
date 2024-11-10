@@ -7,19 +7,25 @@ import toml
 import shutil
 import gpiod
 from smbus2 import SMBus
-from subprocess import call
+from subprocess import call, check_output
 from logging.handlers import RotatingFileHandler
 import logging
 
 # Configure logging
-log_dir = '/var/log/biosense'
-log_file = os.path.join(log_dir, 'ups-monitor.log')
-birdnet_flag_file = '/var/lib/biosense/birdnet_stopped_by_ups_monitor'
+log_dir = "/var/log/biosense"
+log_file = os.path.join(log_dir, "ups-monitor.log")
+birdnet_flag_file = "/var/lib/biosense/birdnet_stopped_by_ups_monitor"
 
 # Set up logging
-log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
-logging.basicConfig(level=logging.INFO, handlers=[log_handler],
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+log_handler = RotatingFileHandler(
+    log_file, maxBytes=1 * 1024 * 1024, backupCount=5
+)  # 1 MB per file, 5 backup files
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
 
 def readVoltage(bus, address, scale_factor=1.0):
     try:
@@ -31,6 +37,7 @@ def readVoltage(bus, address, scale_factor=1.0):
         logging.error(f"Error reading voltage: {e}")
         return None
 
+
 def readCapacity(bus, address, scale_factor=1.0):
     try:
         read = bus.read_word_data(address, 4)
@@ -40,6 +47,7 @@ def readCapacity(bus, address, scale_factor=1.0):
     except Exception as e:
         logging.error(f"Error reading capacity: {e}")
         return None
+
 
 def get_battery_status(voltage):
     if voltage is None:
@@ -57,6 +65,7 @@ def get_battery_status(voltage):
     else:
         return "Unknown"
 
+
 def load_config(config_file):
     try:
         config = toml.load(config_file)
@@ -67,30 +76,63 @@ def load_config(config_file):
         logging.error(f"Error reading configuration file: {e}")
         exit(1)
 
+
+def get_enabled_service():
+    """Determine which BirdNET-related service is enabled."""
+    enabled_services = []
+    try:
+        if check_output(["systemctl", "is-enabled", "--quiet", "run-birdnet"]) is None:
+            enabled_services.append("run-birdnet")
+    except:
+        pass
+    try:
+        if (
+            check_output(
+                ["systemctl", "is-enabled", "--quiet", "extract-birdnet-embeddings"]
+            )
+            is None
+        ):
+            enabled_services.append("extract-birdnet-embeddings")
+    except:
+        pass
+    if len(enabled_services) > 1:
+        logging.error(
+            "Both run-birdnet and extract-birdnet-embeddings are enabled. Please enable only one."
+        )
+        return None
+    elif len(enabled_services) == 1:
+        return enabled_services[0]
+    else:
+        logging.error("No BirdNET-related service is enabled.")
+        return None
+
+
 def main():
-    config_file = '/etc/biosense/ups-monitor.conf'
+    config_file = "/etc/biosense/ups-monitor.conf"
     config = load_config(config_file)
     logging.info("Configuration file loaded")
-    os.makedirs('/var/lib/biosense', exist_ok=True)
+    os.makedirs("/var/lib/biosense", exist_ok=True)
 
     try:
         # Load configuration options with scaling factors
-        shutdown_threshold = config['DEFAULT'].get('SHUTDOWN_THRESHOLD', 3)
-        pld_pin = config['DEFAULT'].get('PLD_PIN', 6)
-        battery_low_threshold = config['DEFAULT'].get('BATTERY_LOW_THRESHOLD', 20)
-        voltage_threshold = config['DEFAULT'].get('VOLTAGE_THRESHOLD', 3.20)
-        check_interval = config['DEFAULT'].get('CHECK_INTERVAL', 120)
-        shutdown_delay = config['DEFAULT'].get('SHUTDOWN_DELAY', 1)
-        bus_number = config['DEFAULT'].get('BUS', 1)
-        address = int(config['DEFAULT'].get('ADDRESS', "0x36"), 16)
-        voltage_scale = config['DEFAULT'].get('VOLTAGE_SCALE', 1.0)
-        capacity_scale = config['DEFAULT'].get('CAPACITY_SCALE', 1.0)
+        shutdown_threshold = config["DEFAULT"].get("SHUTDOWN_THRESHOLD", 3)
+        pld_pin = config["DEFAULT"].get("PLD_PIN", 6)
+        battery_low_threshold = config["DEFAULT"].get("BATTERY_LOW_THRESHOLD", 20)
+        voltage_threshold = config["DEFAULT"].get("VOLTAGE_THRESHOLD", 3.20)
+        check_interval = config["DEFAULT"].get("CHECK_INTERVAL", 120)
+        shutdown_delay = config["DEFAULT"].get("SHUTDOWN_DELAY", 1)
+        bus_number = config["DEFAULT"].get("BUS", 1)
+        address = int(config["DEFAULT"].get("ADDRESS", "0x36"), 16)
+        voltage_scale = config["DEFAULT"].get("VOLTAGE_SCALE", 1.0)
+        capacity_scale = config["DEFAULT"].get("CAPACITY_SCALE", 1.0)
 
         # BirdNET parameters
-        run_birdnet_capacity_resume = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_RESUME', 80)
-        run_birdnet_voltage_resume = config['DEFAULT'].get('BIRDN_VOLTAGE_RESUME', 3.7)
-        run_birdnet_capacity_stop = config['DEFAULT'].get('BIRDN_BATTERY_CAPACITY_STOP', 30)
-        run_birdnet_voltage_stop = config['DEFAULT'].get('BIRDN_VOLTAGE_STOP', 3.4)
+        birdnet_capacity_resume = config["DEFAULT"].get(
+            "BIRDN_BATTERY_CAPACITY_RESUME", 80
+        )
+        birdnet_voltage_resume = config["DEFAULT"].get("BIRDN_VOLTAGE_RESUME", 3.7)
+        birdnet_capacity_stop = config["DEFAULT"].get("BIRDN_BATTERY_CAPACITY_STOP", 30)
+        birdnet_voltage_stop = config["DEFAULT"].get("BIRDN_VOLTAGE_STOP", 3.4)
     except Exception as e:
         logging.error(f"Error parsing configuration: {e}")
         exit(1)
@@ -100,11 +142,14 @@ def main():
     try:
         bus = SMBus(bus_number)
         logging.info("SMBus initialized")
-        chip = gpiod.Chip('gpiochip4')
+        chip = gpiod.Chip("gpiochip4")
         logging.info("GPIO chip accessed")
         pld_line = chip.get_line(pld_pin)
         pld_line.request(consumer="PLD", type=gpiod.LINE_REQ_DIR_IN)
         logging.info("GPIO line requested")
+
+        # Determine the enabled BirdNET-related service
+        enabled_service = get_enabled_service()
 
         # Check if BirdNET was stopped by this script in a previous run
         birdnet_stopped_by_script = os.path.exists(birdnet_flag_file)
@@ -119,44 +164,70 @@ def main():
                     capacity = readCapacity(bus, address, scale_factor=capacity_scale)
 
                     if voltage is None or capacity is None:
-                        logging.error("Failed to read voltage or capacity; skipping this iteration.")
+                        logging.error(
+                            "Failed to read voltage or capacity; skipping this iteration."
+                        )
                         time.sleep(check_interval)
                         continue
 
                     battery_status = get_battery_status(voltage)
-                    logging.info(f"Capacity: {capacity:.2f}% ({battery_status}), External Power State: {'Connected' if external_power_state == 1 else 'Disconnected'}, Voltage: {voltage:.2f}V")
+                    logging.info(
+                        f"Capacity: {capacity:.2f}% ({battery_status}), External Power State: {'Connected' if external_power_state == 1 else 'Disconnected'}, Voltage: {voltage:.2f}V"
+                    )
 
                     if external_power_state == 1:
                         # Reset shutdown counter and cancel any initiated shutdown if power is restored
                         if shutdown_initiated:
                             call("sudo shutdown -c", shell=True)
                             shutdown_initiated = False
-                            logging.info("Shutdown canceled due to external power restored.")
+                            logging.info(
+                                "Shutdown canceled due to external power restored."
+                            )
                         failure_counter = 0
                         # Resume BirdNET if it was previously stopped by this script
-                        if birdnet_stopped_by_script and capacity > run_birdnet_capacity_resume and voltage > run_birdnet_voltage_resume:
-                            call("systemctl start run-birdnet", shell=True)
+                        if (
+                            enabled_service
+                            and birdnet_stopped_by_script
+                            and capacity > birdnet_capacity_resume
+                            and voltage > birdnet_voltage_resume
+                        ):
+                            call(f"systemctl start {enabled_service}", shell=True)
                             logging.info("BirdNET service resumed")
                             if os.path.exists(birdnet_flag_file):
-                                os.remove(birdnet_flag_file)  # Remove flag file to reset state
+                                os.remove(
+                                    birdnet_flag_file
+                                )  # Remove flag file to reset state
                             birdnet_stopped_by_script = False
                     else:
                         # Stop BirdNET if conditions are met
-                        if (capacity < run_birdnet_capacity_stop or voltage < run_birdnet_voltage_stop) and not birdnet_stopped_by_script:
-                            call("systemctl stop run-birdnet", shell=True)
+                        if (
+                            enabled_service
+                            and (
+                                capacity < birdnet_capacity_stop
+                                or voltage < birdnet_voltage_stop
+                            )
+                            and not birdnet_stopped_by_script
+                        ):
+                            call(f"systemctl stop {enabled_service}", shell=True)
                             logging.info("BirdNET service stopped")
                             birdnet_stopped_by_script = True
-                            with open(birdnet_flag_file, 'w') as f:
+                            with open(birdnet_flag_file, "w") as f:
                                 f.write("BirdNET service stopped by ups-monitor\n")
                         # Only increment failure_counter if battery is below shutdown thresholds
-                        if capacity < battery_low_threshold or voltage < voltage_threshold:
+                        if (
+                            capacity < battery_low_threshold
+                            or voltage < voltage_threshold
+                        ):
                             failure_counter += 1
 
                     if failure_counter >= shutdown_threshold:
                         # Shutdown if critical thresholds are met
                         shutdown_message = f"Critical battery condition met. Initiating shutdown in {shutdown_delay} minute(s)."
                         logging.error(shutdown_message)
-                        call(f"nohup shutdown -h +{shutdown_delay} '{shutdown_message}' > /dev/null 2>&1", shell=True)
+                        call(
+                            f"nohup shutdown -h +{shutdown_delay} '{shutdown_message}' > /dev/null 2>&1",
+                            shell=True,
+                        )
                         shutdown_initiated = True
                         break
 
@@ -172,6 +243,7 @@ def main():
             time.sleep(check_interval)
     finally:
         exit(0)
+
 
 if __name__ == "__main__":
     main()

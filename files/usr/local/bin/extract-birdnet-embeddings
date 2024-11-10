@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import time
+import signal
+import shutil
+import re
+from datetime import datetime, timedelta
+import logging
+from logging.handlers import RotatingFileHandler
+
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    ForeignKey,
+    Index,
+    inspect,
+)
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
+
+import toml
+from birdnetlib import Recording
+from birdnetlib.analyzer import Analyzer
+
+# Configure logging
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "extract-birdnet-embeddings.log")
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+
+# Function to read configuration with error handling
+def read_config(config_file):
+    try:
+        if not os.path.exists(config_file):
+            raise Exception(f"Configuration file does not exist: {config_file}")
+
+        logging.info(f"Reading configuration file: {config_file}")
+        with open(config_file, "r") as f:
+            content = toml.load(f)
+
+        if not content:
+            raise Exception("Configuration file is empty or not found.")
+
+        return content["DEFAULT"]
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
+
+# Read configuration
+config_file = "/etc/biosense/extract-birdnet-embeddings.conf"
+config = read_config(config_file)
+
+RECORDING_DIR = config.get(
+    "RECORDING_DIR", "/home/biosense/datastore/sound_recordings/"
+)
+EXPORT_DIR = config.get(
+    "EXPORT_DIR", "/home/biosense/datastore/sound_analysis_results/"
+)
+PROCESSED_DIR = config.get(
+    "PROCESSED_DIR", "/home/biosense/datastore/processed_recordings/"
+)
+SEGMENT_LENGTH = int(config.get("SEGMENT_LENGTH", 3))
+DB_PATH = config.get(
+    "DB_PATH", "/home/biosense/datastore/extract-birdnet-embeddings.db"
+)
+OVERLAP = float(config.get("OVERLAP", 1.5))
+SENSITIVITY = float(config.get("SENSITIVITY", 0.5))
+
+# Handle empty or invalid latitude/longitude values
+try:
+    LATITUDE = float(os.getenv("LATITUDE", "0.0"))
+    LONGITUDE = float(os.getenv("LONGITUDE", "0.0"))
+except ValueError:
+    LATITUDE, LONGITUDE = 0.0, 0.0
+    logging.warning(
+        "Invalid LATITUDE or LONGITUDE environment variable; defaulting to 0.0 for both."
+    )
+
+HOSTNAME = os.uname().nodename.replace("-", "_")
+
+# SQLAlchemy setup
+Base = declarative_base()
+
+
+class Species(Base):
+    __tablename__ = "species"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sci_name = Column(String, unique=True, nullable=False)
+    com_name = Column(String, nullable=False)
+
+
+class RecordingInterval(Base):
+    __tablename__ = "recording_intervals"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hostname = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    timestamp = Column(DateTime)
+    start_time = Column(Float)
+    end_time = Column(Float)
+    source_recording = Column(String, nullable=True)
+
+
+class EmbeddingValue(Base):
+    __tablename__ = "embedding_values"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    species_id = Column(Integer, ForeignKey("species.id"), nullable=False)
+    recording_interval_id = Column(
+        Integer, ForeignKey("recording_intervals.id"), nullable=False
+    )
+    embedding_value = Column(Float, nullable=False)
+
+
+# Create the engine and tables
+engine = create_engine(f"sqlite:///{DB_PATH}")
+Base.metadata.create_all(engine)
+
+# Initialize session
+Session = sessionmaker(bind=engine)
+session = Session()
+
+
+# Load species labels and populate the Species table
+def load_species_labels():
+    analyzer = Analyzer()
+    labels = analyzer.labels
+    for label in labels:
+        sci_name, com_name = label.split("_")
+
+        # Check if the species already exists in the database
+        existing_species = session.query(Species).filter_by(sci_name=sci_name).first()
+
+        if not existing_species:
+            # Only add if the species does not already exist
+            species = Species(sci_name=sci_name, com_name=com_name)
+            session.add(species)
+
+    try:
+        session.commit()
+        logging.info("Species labels loaded into database.")
+    except Exception as e:
+        logging.error(f"Error committing species labels: {e}")
+        session.rollback()
+
+
+# Function to get creation time of a file
+def get_creation_time(filepath):
+    try:
+        match = re.search(r"_(\d{8}_\d{6})-(\d+)", filepath)
+        if match:
+            timestamp_str = match.group(1)
+            segment_number = int(match.group(2))
+
+            # Parse the initial timestamp
+            initial_time = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+            # Calculate the exact start time for this segment
+            segment_offset = timedelta(minutes=15 * (segment_number - 1))
+            return initial_time + segment_offset
+        else:
+            logging.error(
+                f"No valid timestamp or segment number found in filename: {filepath}"
+            )
+            return None
+    except Exception as e:
+        logging.error(f"Error parsing timestamp from filename {filepath}: {e}")
+        return None
+
+
+# Function to create partitioned directories by date
+def create_partitioned_dir(base_dir, timestamp):
+    year = timestamp.strftime("%Y")
+    month = timestamp.strftime("%m")
+    day = timestamp.strftime("%d")
+    partitioned_dir = os.path.join(base_dir, year, month, day)
+    os.makedirs(partitioned_dir, exist_ok=True)
+    return partitioned_dir
+
+
+# Function to process recordings and extract embeddings
+def process_recording_for_embeddings(recording_path, analyzer):
+    recording_timestamp = get_creation_time(recording_path)
+    recording = Recording(
+        analyzer,
+        recording_path,
+        lat=LATITUDE,
+        lon=LONGITUDE,
+        overlap=OVERLAP,
+        sensitivity=SENSITIVITY,
+        date=recording_timestamp,
+    )
+
+    recording.analyze()
+    recording.extract_embeddings()
+    embeddings_data = recording.embeddings_list
+
+    for entry in embeddings_data:
+        interval = RecordingInterval(
+            hostname=HOSTNAME,
+            latitude=LATITUDE,
+            longitude=LONGITUDE,
+            timestamp=recording_timestamp,
+            start_time=entry["start_time"],
+            end_time=entry["end_time"],
+            source_recording=recording_path,
+        )
+        session.add(interval)
+        session.commit()
+
+        for idx, embedding_value in enumerate(entry["embeddings"]):
+            species_id = session.query(Species.id).filter_by(id=idx).scalar()
+            embedding_entry = EmbeddingValue(
+                species_id=species_id,
+                recording_interval_id=interval.id,
+                embedding_value=embedding_value,
+            )
+            session.add(embedding_entry)
+        session.commit()
+    logging.info("Embeddings stored in database for interval.")
+
+
+def analyze_recordings():
+    analyzer = Analyzer()
+    load_species_labels()
+
+    while True:
+        logging.info("Starting to analyze recordings.")
+        current_time = time.time()
+        files = sorted(
+            os.listdir(RECORDING_DIR),
+            key=lambda x: os.path.getctime(os.path.join(RECORDING_DIR, x)),
+        )
+        flac_files = [f for f in files if f.endswith(".flac")]
+
+        for filename in flac_files:
+            filepath = os.path.join(RECORDING_DIR, filename)
+            if current_time - os.path.getmtime(filepath) < 300:
+                logging.info(f"Skipping file still being written: {filepath}")
+                continue
+
+            logging.info(f"Processing file: {filepath}")
+            recording_timestamp = get_creation_time(filepath)
+            process_recording_for_embeddings(filepath, analyzer)
+
+            processed_dir_partitioned = create_partitioned_dir(
+                PROCESSED_DIR, recording_timestamp
+            )
+            destination = os.path.join(
+                processed_dir_partitioned, os.path.basename(filepath)
+            )
+            shutil.move(filepath, destination)
+            logging.info(f"Moved recording to processed directory: {destination}")
+
+        time.sleep(300)
+
+
+def main():
+    def signal_handler(sig, frame):
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    logging.info("Starting main loop.")
+    analyze_recordings()
+
+
+if __name__ == "__main__":
+    main()
