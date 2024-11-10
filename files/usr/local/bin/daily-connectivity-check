@@ -54,7 +54,7 @@ def load_db_path():
         sys.exit(1)
 
 
-def wireguard_needs_restart(session):
+def action_required(session):
     # Calculate the earliest timestamp for the 24-hour interval to check
     time_threshold = datetime.utcnow() - timedelta(hours=24)
 
@@ -83,17 +83,33 @@ def restart_wireguard():
         logging.error(f"Failed to restart WireGuard service: {e}")
 
 
+def ssh_sessions_active():
+    result = subprocess.run(["ss", "-tnp"], capture_output=True, text=True)
+    return ":22" in result.stdout
+
+
+def restart_networking():
+    if ssh_sessions_active():
+        logging.info("Active SSH sessions detected; skipping network restart.")
+    else:
+        try:
+            subprocess.run(["sudo", "systemctl", "restart", "networking"], check=True)
+            logging.info("Networking service restarted successfully.")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Failed to restart networking service: {e}")
+
+
 def main():
     db_path = load_db_path()
     engine = get_engine(db_path)
     session = create_session(engine)()
 
     # Check for successful pings within the last 24 hours
-    if wireguard_needs_restart(session):
+    if action_required(session):
         logging.warning(
             "No successful pings detected in the last 24 hours, restarting WireGuard."
         )
-        restart_wireguard()
+        restart_networking()
     else:
         logging.info(
             "Successful pings detected within the last 24 hours; no action required."
