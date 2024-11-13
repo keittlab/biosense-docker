@@ -83,8 +83,8 @@ def delete_lowest_confidence_record_by_com_name(com_name, dry_run=False):
 
         # Step 1: Select a random record with the specified com_name
         cursor.execute(
-            "SELECT id, source_recording, start_time, end_time, confidence, timestamp FROM birdnet_detections "
-            "WHERE com_name = ? AND source_recording IS NOT NULL",
+            "SELECT id, file_path, start_time, end_time, confidence, timestamp FROM birdnet_detections "
+            "WHERE com_name = ? AND file_path IS NOT NULL",
             (com_name,),
         )
         records = cursor.fetchall()
@@ -120,7 +120,7 @@ def delete_lowest_confidence_record_by_com_name(com_name, dry_run=False):
 
             # Step 2: Find all overlapping records with the same com_name, allowing for date boundary
             cursor.execute(
-                "SELECT id, source_recording, confidence, start_time, end_time, timestamp FROM birdnet_detections "
+                "SELECT id, file_path, confidence, start_time, end_time, timestamp FROM birdnet_detections "
                 "WHERE com_name = ? AND source_recording IS NOT NULL "
                 "AND datetime(timestamp, '+' || start_time || ' seconds') < ? "
                 "AND datetime(timestamp, '+' || end_time || ' seconds') > ?",
@@ -133,7 +133,7 @@ def delete_lowest_confidence_record_by_com_name(com_name, dry_run=False):
             for overlap in overlapping_records:
                 (
                     overlap_id,
-                    overlap_source_recording,
+                    overlap_file_path,
                     overlap_confidence,
                     overlap_start_time,
                     overlap_end_time,
@@ -146,7 +146,7 @@ def delete_lowest_confidence_record_by_com_name(com_name, dry_run=False):
                     seconds=overlap_end_time
                 )
                 logging.debug(
-                    f"Record ID: {overlap_id}, Source: {overlap_source_recording}, Confidence: {overlap_confidence}, "
+                    f"Record ID: {overlap_id}, Source: {overlap_file_path}, Confidence: {overlap_confidence}, "
                     f"Start time: {overlap_start_time} (Absolute: {overlap_start_abs}), "
                     f"End time: {overlap_end_time} (Absolute: {overlap_end_abs}), Timestamp: {overlap_timestamp}"
                 )
@@ -154,22 +154,22 @@ def delete_lowest_confidence_record_by_com_name(com_name, dry_run=False):
             # Step 3: Select the lowest-confidence overlapping record
             if overlapping_records:
                 lowest_confidence_record = min(overlapping_records, key=lambda x: x[2])
-                overlap_id, overlap_source_recording, overlap_confidence = (
+                overlap_id, overlap_file_path, overlap_confidence = (
                     lowest_confidence_record[:3]
                 )
                 logging.info(
-                    f"Deleting lowest-confidence overlapping record: {overlap_source_recording} (Confidence: {overlap_confidence})"
+                    f"Deleting lowest-confidence overlapping record: {overlap_file_path} (Confidence: {overlap_confidence})"
                 )
 
-                # Delete the lowest confidence overlapping record
+                # Set the file path to null for the selected
                 if not dry_run:
                     cursor.execute(
-                        "UPDATE birdnet_detections SET source_recording = NULL WHERE id = ?",
-                        (overlap_id,),
+                        "UPDATE birdnet_detections SET file_path = NULL WHERE file_path = ?",
+                        (overlap_file_path,),
                     )
                     conn.commit()
 
-                file_path = os.path.join(RESULTS_DIR, overlap_source_recording)
+                file_path = os.path.join(RESULTS_DIR, overlap_file_path)
                 if os.path.isfile(file_path):
                     logging.info(f"Deleting recording file: {file_path}")
                     if not dry_run:
