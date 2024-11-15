@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import argparse
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, DateTime, Boolean, String, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -13,7 +14,7 @@ import random
 
 # Configure logging
 log_dir = "/var/log/biosense/"
-log_file = os.path.join(log_dir, "weekly-connectivity-check.log")
+log_file = os.path.join(log_dir, "connectivity-check.log")
 os.makedirs(log_dir, exist_ok=True)
 
 log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
@@ -59,9 +60,9 @@ def load_db_path():
         sys.exit(1)
 
 
-def action_required(session):
-    # Calculate the earliest timestamp for the 7-day interval to check
-    time_threshold = datetime.utcnow() - timedelta(weeks=1)
+def action_required(session, interval):
+    # Calculate the earliest timestamp for the interval to check
+    time_threshold = datetime.utcnow() - interval
 
     # Query the database for total pings within the interval
     total_count = (
@@ -83,12 +84,23 @@ def ssh_sessions_active():
     return ":22" in result.stdout
 
 
+def restart_networking():
+    if ssh_sessions_active():
+        logging.info("Active SSH sessions detected; skipping network restart.")
+    else:
+        try:
+            subprocess.run(["sudo", "systemctl", "restart", "networking"], check=True)
+            logging.info("Networking service restarted successfully.")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Failed to restart networking service: {e}")
+
+
 def reboot():
     if ssh_sessions_active():
         logging.info("Active SSH sessions detected; skipping reboot.")
     else:
         try:
-            # Set a random delay between 1 and 60 minutes
+            # Set a random delay between 10 and 720 minutes (12 hours)
             delay_minutes = random.randint(10, 12 * 60)
             logging.info(f"System will reboot in {delay_minutes} minute(s).")
             subprocess.run(
@@ -99,20 +111,57 @@ def reboot():
 
 
 def main():
+    # Set up command line argument parsing
+    parser = argparse.ArgumentParser(description="Connectivity Check Script")
+    parser.add_argument(
+        "--interval",
+        type=str,
+        required=True,
+        help="Time interval for connectivity check (e.g., '24h' or '7d')",
+    )
+    parser.add_argument(
+        "--action",
+        type=str,
+        required=True,
+        choices=["restart_networking", "reboot"],
+        help="Action to take if no successful pings are found",
+    )
+    args = parser.parse_args()
+
+    # Parse the interval argument
+    if args.interval.endswith("h"):
+        hours = int(args.interval[:-1])
+        interval = timedelta(hours=hours)
+    elif args.interval.endswith("d"):
+        days = int(args.interval[:-1])
+        interval = timedelta(days=days)
+    elif args.interval.endswith("w"):
+        weeks = int(args.interval[:-1])
+        interval = timedelta(weeks=weeks)
+    else:
+        logging.error(
+            "Invalid interval format. Use 'h' for hours, 'd' for days, or 'w' for weeks."
+        )
+        sys.exit(1)
+
+    # Load the database path and create a session
     db_path = load_db_path()
     engine = get_engine(db_path)
     Session = create_session(engine)  # Get the session factory
     session = Session()  # Call the factory to create a new session
 
-    # Check for successful pings within the last week
-    if action_required(session):
+    # Check for successful pings within the given interval
+    if action_required(session, interval):
         logging.warning(
-            "No successful pings detected in the last week, initiating reboot."
+            f"No successful pings detected in the last {args.interval}, initiating action: {args.action}."
         )
-        reboot()
+        if args.action == "restart_networking":
+            restart_networking()
+        elif args.action == "reboot":
+            reboot()
     else:
         logging.info(
-            "Successful pings detected within the last week; no action required."
+            f"Successful pings detected within the last {args.interval}; no action required."
         )
 
     # Close the session
