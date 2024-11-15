@@ -65,7 +65,7 @@ def get_most_frequent_com_name_by_week(week):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT com_name, COUNT(*) AS freq FROM birdnet_detections WHERE strftime('%W-%m-%Y', timestamp) = ? GROUP BY com_name ORDER BY freq DESC LIMIT 1",
+            "SELECT com_name, COUNT(*) AS freq FROM birdnet_detections WHERE strftime('%W-%Y', timestamp) = ? GROUP BY com_name ORDER BY freq DESC LIMIT 1",
             (week,),
         )
         result = cursor.fetchone()
@@ -85,7 +85,7 @@ def delete_lowest_confidence_record_by_com_name_and_week(com_name, week, dry_run
         # Step 1: Select a random record with the specified com_name
         cursor.execute(
             "SELECT id, file_path, start_time, end_time, confidence, timestamp FROM birdnet_detections "
-            "WHERE com_name = ? AND strftime('%W-%m-%Y', timestamp) = ? AND file_path IS NOT NULL",
+            "WHERE com_name = ? AND strftime('%W-%Y', timestamp) = ? AND file_path IS NOT NULL",
             (
                 com_name,
                 week,
@@ -199,7 +199,7 @@ def get_week_with_most_distinct_records(table, column):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT strftime('%W-%m-%Y', timestamp) as week, COUNT(DISTINCT {column}) as distinct_count "
+            f"SELECT strftime('%W-%Y', timestamp) as week, COUNT(DISTINCT {column}) as distinct_count "
             f"FROM {table} WHERE {column} IS NOT NULL GROUP BY week ORDER BY distinct_count DESC LIMIT 1"
         )
         result = cursor.fetchone()
@@ -236,7 +236,7 @@ def delete_random_recording_from_processed(dry_run=False):
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT DISTINCT source_recording FROM birdnet_detections "
-                "WHERE source_recording IS NOT NULL AND strftime('%W-%m-%Y', timestamp) = ?",
+                "WHERE source_recording IS NOT NULL AND strftime('%W-%Y', timestamp) = ?",
                 (week,),
             )
             source_recordings = cursor.fetchall()
