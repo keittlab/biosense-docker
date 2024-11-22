@@ -1,0 +1,77 @@
+import os
+import logging
+from logging.handlers import RotatingFileHandler
+import socket
+import configparser
+
+# Configure logging
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "monitor-port.log")
+os.makedirs(log_dir, exist_ok=True)
+
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Load configuration
+config_file = "/etc/biosense/monitor-port.conf"
+if not os.path.exists(config_file):
+    logger.error(f"Configuration file {config_file} not found. Exiting.")
+    exit(1)
+
+config = configparser.ConfigParser()
+config.read(config_file)
+
+# Extract configuration values with validation
+try:
+    host = config["DEFAULT"]["HOST"]
+    port = int(config["DEFAULT"]["PORT"])
+    action_script = config["DEFAULT"]["ACTION_SCRIPT"]
+except KeyError as e:
+    logger.error(f"Missing required configuration: {e}. Exiting.")
+    exit(1)
+except ValueError as e:
+    logger.error(f"Invalid configuration value: {e}. Exiting.")
+    exit(1)
+
+# Ensure action script exists
+if not os.path.exists(action_script):
+    logger.error(f"Action script {action_script} not found. Exiting.")
+    exit(1)
+
+logger.info(
+    f"Configuration loaded successfully: host={host}, port={port}, action_script={action_script}"
+)
+
+
+# UDP server
+def run_server(host, port):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((host, port))
+        logger.info(f"Server started on {host}:{port}")
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        return
+
+    while True:
+        try:
+            data, addr = sock.recvfrom(1024)  # Buffer size is 1024 bytes
+            message = data.decode().strip()
+            logger.info(f"Received message: '{message}' from {addr}")
+
+            # Take action based on message
+            logger.info(
+                f"Executing action script: {action_script} with message '{message}'"
+            )
+            os.system(f"{action_script} '{message}'")
+        except Exception as e:
+            logger.error(f"Error handling message: {e}")
+
+
+if __name__ == "__main__":
+    run_server(host, port)
