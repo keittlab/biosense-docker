@@ -3,7 +3,6 @@
 import os
 import sys
 import logging
-import argparse
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, Column, Integer, DateTime, Boolean, String, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -43,7 +42,7 @@ def get_engine(db_path):
 
 def create_session(engine):
     Session = sessionmaker(bind=engine)
-    return Session  # Return the session factory itself
+    return Session
 
 
 def load_db_path():
@@ -61,32 +60,38 @@ def load_db_path():
 
 
 def action_required(session, interval):
-    # Calculate the earliest timestamp for the interval to check
     time_threshold = datetime.utcnow() - interval
-
-    # Query the database for total pings within the interval
     total_count = (
         session.query(PingData).filter(PingData.timestamp >= time_threshold).count()
     )
-
-    # Query the database for successful pings within the interval
     success_count = (
         session.query(PingData)
         .filter(PingData.timestamp >= time_threshold, PingData.success == True)
         .count()
     )
-
     return total_count > 0 and success_count == 0
 
 
-def ssh_sessions_active():
-    result = subprocess.run(["ss", "-tnp"], capture_output=True, text=True)
-    return ":22" in result.stdout
+def active_sessions():
+    try:
+        result = subprocess.run(["who"], capture_output=True, text=True, check=True)
+        if not result.stdout.strip():
+            logging.info("No active sessions detected by 'who'.")
+            return False
+        active_ttys = [
+            line.split()[1]
+            for line in result.stdout.strip().split("\n")
+            if len(line.split()) > 1
+        ]
+        return any(os.path.exists(f"/dev/{tty}") for tty in active_ttys)
+    except Exception as e:
+        logging.error(f"Error checking active sessions: {e}")
+        return False
 
 
 def restart_networking():
-    if ssh_sessions_active():
-        logging.info("Active SSH sessions detected; skipping network restart.")
+    if active_sessions():
+        logging.info("Active sessions detected; skipping network restart.")
     else:
         try:
             subprocess.run(["sudo", "systemctl", "restart", "networking"], check=True)
@@ -96,12 +101,11 @@ def restart_networking():
 
 
 def reboot():
-    if ssh_sessions_active():
-        logging.info("Active SSH sessions detected; skipping reboot.")
+    if active_sessions():
+        logging.info("Active sessions detected; skipping reboot.")
     else:
         try:
-            # Set a random delay between 10 and 720 minutes (12 hours)
-            delay_minutes = random.randint(10, 12 * 60)
+            delay_minutes = random.randint(10, 60)
             logging.info(f"System will reboot in {delay_minutes} minute(s).")
             subprocess.run(
                 ["sudo", "shutdown", f"+{delay_minutes}", "reboot"], check=True
@@ -111,61 +115,25 @@ def reboot():
 
 
 def main():
-    # Set up command line argument parsing
-    parser = argparse.ArgumentParser(description="Connectivity Check Script")
-    parser.add_argument(
-        "--interval",
-        type=str,
-        required=True,
-        help="Time interval for connectivity check (e.g., '24h' or '7d')",
-    )
-    parser.add_argument(
-        "--action",
-        type=str,
-        required=True,
-        choices=["restart_networking", "reboot"],
-        help="Action to take if no successful pings are found",
-    )
-    args = parser.parse_args()
-
-    # Parse the interval argument
-    if args.interval.endswith("h"):
-        hours = int(args.interval[:-1])
-        interval = timedelta(hours=hours)
-    elif args.interval.endswith("d"):
-        days = int(args.interval[:-1])
-        interval = timedelta(days=days)
-    elif args.interval.endswith("w"):
-        weeks = int(args.interval[:-1])
-        interval = timedelta(weeks=weeks)
-    else:
-        logging.error(
-            "Invalid interval format. Use 'h' for hours, 'd' for days, or 'w' for weeks."
-        )
-        sys.exit(1)
-
-    # Load the database path and create a session
     db_path = load_db_path()
     engine = get_engine(db_path)
-    Session = create_session(engine)  # Get the session factory
-    session = Session()  # Call the factory to create a new session
+    Session = create_session(engine)
+    session = Session()
 
-    # Check for successful pings within the given interval
-    if action_required(session, interval):
-        logging.warning(
-            f"No successful pings detected in the last {args.interval}, initiating action: {args.action}."
-        )
-        if args.action == "restart_networking":
-            restart_networking()
-        elif args.action == "reboot":
+    try:
+        # Check for weekly condition (reboot if necessary)
+        if action_required(session, timedelta(weeks=1)):
+            logging.warning("No successful pings in the last 1 week. Rebooting system.")
             reboot()
-    else:
-        logging.info(
-            f"Successful pings detected within the last {args.interval}; no action required."
-        )
-
-    # Close the session
-    session.close()
+        else:
+            # Check for daily condition (restart networking if necessary)
+            if action_required(session, timedelta(days=1)):
+                logging.warning(
+                    "No successful pings in the last 1 day. Restarting networking."
+                )
+                restart_networking()
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":

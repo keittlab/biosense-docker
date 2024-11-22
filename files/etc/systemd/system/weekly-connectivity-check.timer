@@ -1,9 +1,0 @@
-[Unit]
-Description=Run Weekly Connectivity Check
-
-[Timer]
-OnBootSec=1w
-OnUnitActiveSec=1w
-
-[Install]
-WantedBy=timers.target
