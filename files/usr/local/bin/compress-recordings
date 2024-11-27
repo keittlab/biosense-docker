@@ -49,8 +49,8 @@ def scan_and_convert():
 
         for filename in wav_files:
             filepath = os.path.join(RECORDING_DIR, filename)
-            # Check if the file has not been modified in the last 900 seconds
-            if current_time - os.path.getmtime(filepath) < 900:
+            # Check if the file has not been modified in the last 300 seconds
+            if current_time - os.path.getmtime(filepath) < 300:
                 continue
 
             flac_file = filepath.replace(".wav", ".flac")
