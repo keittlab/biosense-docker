@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# WireGuard interface and peer public key
+WG_INTERFACE="biosense"
+PEER_PUBLIC_KEY=""
+
+# Function to log messages
+log_message() {
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $1"
+}
+
+# Check if running as root or using sudo
+if [[ "$EUID" -ne 0 ]]; then
+    log_message "Error: This script must be run as root or with sudo."
+    exit 1
+fi
+
+# Ensure the WireGuard interface exists
+if ! wg show "$WG_INTERFACE" >/dev/null 2>&1; then
+    log_message "Error: Unable to access WireGuard interface $WG_INTERFACE. Exiting."
+    exit 1
+fi
+
+# Get the latest handshake timestamp for the specified peer
+LATEST_HANDSHAKE=$(wg show "$WG_INTERFACE" latest-handshakes | grep "$PEER_PUBLIC_KEY" | awk '{print $2}')
+
+# Check if the public key exists
+if [[ -z "$LATEST_HANDSHAKE" ]]; then
+    log_message "Error: Public key $PEER_PUBLIC_KEY not found on interface $WG_INTERFACE. Exiting."
+    exit 1
+fi
+
+# Get the current Unix time
+CURRENT_TIME=$(date +%s)
+
+# Check if a valid handshake timestamp was retrieved
+if [[ "$LATEST_HANDSHAKE" != "0" ]]; then
+    # Calculate the elapsed time in seconds
+    ELAPSED_TIME=$((CURRENT_TIME - LATEST_HANDSHAKE))
+
+    if [[ $ELAPSED_TIME -gt 3600 ]]; then
+        log_message "Latest handshake for $PEER_PUBLIC_KEY is older than 60 minutes. Restarting $WG_INTERFACE."
+        systemctl restart wg-quick@$WG_INTERFACE.service
+    else
+        log_message "Latest handshake for $PEER_PUBLIC_KEY is recent ($ELAPSED_TIME seconds ago). No action needed."
+    fi
+else
+    log_message "No handshake detected for $PEER_PUBLIC_KEY. Restarting $WG_INTERFACE."
+    systemctl restart wg-quick@$WG_INTERFACE.service
+fi
