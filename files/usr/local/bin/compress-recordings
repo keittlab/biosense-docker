@@ -5,21 +5,45 @@ import time
 import logging
 from logging.handlers import RotatingFileHandler
 import subprocess
+import configparser
 from datetime import datetime
 
-# Configure logging
-log_dir = "/var/log/biosense/"
-log_file = os.path.join(log_dir, "compress-recordings.log")
+# Read Configuration
+CONFIG_FILE = "/etc/biosense/compress-recordings.conf"
+config = configparser.ConfigParser()
+config.read(CONFIG_FILE)
+
+RECORDING_DIR = config["DEFAULT"].get(
+    "RECORDING_DIR", "/home/biosense/datastore/sound_recordings/"
+)
+LOG_DIR = config["DEFAULT"].get("LOG_DIR", "/var/log/biosense/")
+LOG_FILE = config["DEFAULT"].get("LOG_FILE", "compress-recordings.log")
+
+# FFmpeg Options
+NORMALIZE = config["DEFAULT"].getboolean("NORMALIZE", True)
+TARGET_LOUDNESS = config["DEFAULT"].get("TARGET_LOUDNESS")  # Use None if not specified
+TRUE_PEAK = config["DEFAULT"].get("TRUE_PEAK")
+LOUDNESS_RANGE = config["DEFAULT"].get("LOUDNESS_RANGE")
+CHANNELS = config["DEFAULT"].getint("CHANNELS", 1)
+
+# Convert to float only if values are specified
+TARGET_LOUDNESS = float(TARGET_LOUDNESS) if TARGET_LOUDNESS is not None else None
+TRUE_PEAK = float(TRUE_PEAK) if TRUE_PEAK is not None else None
+LOUDNESS_RANGE = float(LOUDNESS_RANGE) if LOUDNESS_RANGE is not None else None
+
+# Ensure that the directory exists before creating the log file
+os.makedirs(LOG_DIR, exist_ok=True)
+
+log_file_path = os.path.join(LOG_DIR, LOG_FILE)
+
 log_handler = RotatingFileHandler(
-    log_file, maxBytes=1 * 1024 * 1024, backupCount=5
-)  # 1 MB per file, 5 backup files
+    log_file_path, maxBytes=1 * 1024 * 1024, backupCount=5  # 1 MB per file, 5 backups
+)
 logging.basicConfig(
     level=logging.INFO,
     handlers=[log_handler],
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
-
-RECORDING_DIR = "/home/biosense/datastore/sound_recordings"
 
 
 def check_wav_integrity(wav_file):
@@ -46,10 +70,80 @@ def check_wav_integrity(wav_file):
         return False
 
 
+def construct_loudnorm_filter():
+    normalization_filter = "loudnorm"
+    # Append settings only if they are defined
+    if TARGET_LOUDNESS is not None:
+        normalization_filter += f"=I={TARGET_LOUDNESS}"
+    if TRUE_PEAK is not None:
+        normalization_filter += f":TP={TRUE_PEAK}"
+    if LOUDNESS_RANGE is not None:
+        normalization_filter += f":LRA={LOUDNESS_RANGE}"
+    return normalization_filter
+
+
+def get_sample_rate(wav_file):
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=sample_rate",
+                "-of",
+                "default=nw=1:nk=1",
+                wav_file,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            sample_rate = int(result.stdout.strip())
+            logging.info(f"Sample rate for {wav_file}: {sample_rate} Hz")
+            return sample_rate
+        else:
+            logging.error(
+                f"Error retrieving sample rate for {wav_file}: {result.stderr}"
+            )
+            return None
+    except Exception as e:
+        logging.error(f"Error extracting sample rate from {wav_file}: {e}")
+        return None
+
+
 def convert_to_flac(wav_file, flac_file):
     try:
-        subprocess.run(["ffmpeg", "-i", wav_file, "-ac", "1", flac_file], check=True)
-        logging.info(f"Converted {wav_file} to {flac_file}")
+        sample_rate = get_sample_rate(wav_file)
+        if sample_rate is None:
+            logging.error(
+                f"Skipping conversion for {wav_file} due to sample rate error."
+            )
+            return
+
+        command = [
+            "ffmpeg",
+            "-i",
+            wav_file,
+            "-ac",
+            str(CHANNELS),
+            "-ar",
+            str(sample_rate),
+        ]
+
+        if NORMALIZE:
+            normalization_filter = construct_loudnorm_filter()
+            command.extend(["-af", normalization_filter])
+
+        command.append(flac_file)
+
+        subprocess.run(command, check=True)
+        logging.info(
+            f"Converted {wav_file} to {flac_file} with sample rate {sample_rate} Hz "
+            f"and {'without' if not NORMALIZE else 'with'} normalization"
+        )
     except subprocess.CalledProcessError as e:
         logging.error(f"Error converting {wav_file} to FLAC: {e}")
 
@@ -67,7 +161,9 @@ def scan_and_convert():
             if current_time - os.path.getmtime(filepath) < 300:
                 continue
 
-            flac_file = filepath.replace(".wav", ".flac")
+            flac_file = os.path.join(
+                RECORDING_DIR, os.path.basename(filepath).replace(".wav", ".flac")
+            )
             logging.info(f"Processing file: {filepath}")
 
             # Check integrity before converting
