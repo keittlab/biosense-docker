@@ -8,19 +8,31 @@ import subprocess
 from datetime import datetime
 
 # Configure logging
-log_dir = '/var/log/biosense/'
-log_file = os.path.join(log_dir, 'compress-recordings.log')
-log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)  # 1 MB per file, 5 backup files
-logging.basicConfig(level=logging.INFO, handlers=[log_handler],
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "compress-recordings.log")
+log_handler = RotatingFileHandler(
+    log_file, maxBytes=1 * 1024 * 1024, backupCount=5
+)  # 1 MB per file, 5 backup files
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
-RECORDING_DIR = '/home/biosense/datastore/sound_recordings'
+RECORDING_DIR = "/home/biosense/datastore/sound_recordings"
+
 
 def check_wav_integrity(wav_file):
     try:
-        result = subprocess.run(['ffmpeg', '-v', 'error', '-i', wav_file, '-f', 'null', '-'], capture_output=True, text=True)
+        result = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", wav_file, "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode != 0 or result.stderr:
-            logging.warning(f"Integrity check failed for {wav_file}: {result.stderr.strip()}")
+            logging.warning(
+                f"Integrity check failed for {wav_file}: {result.stderr.strip()}"
+            )
             # Delete the corrupt file after logging
             try:
                 os.remove(wav_file)
@@ -33,12 +45,14 @@ def check_wav_integrity(wav_file):
         logging.error(f"Error checking integrity of {wav_file}: {e}")
         return False
 
+
 def convert_to_flac(wav_file, flac_file):
     try:
-        subprocess.run(['ffmpeg', '-i', wav_file, flac_file], check=True)
+        subprocess.run(["ffmpeg", "-i", wav_file, "-ac", "1", flac_file], check=True)
         logging.info(f"Converted {wav_file} to {flac_file}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Error converting {wav_file} to FLAC: {e}")
+
 
 def scan_and_convert():
     while True:
@@ -73,9 +87,11 @@ def scan_and_convert():
 
         time.sleep(300)  # Check every 5 minutes
 
+
 def main():
     logging.info("Starting the WAV to FLAC compression service")
     scan_and_convert()
+
 
 if __name__ == "__main__":
     main()
