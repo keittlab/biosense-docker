@@ -25,7 +25,8 @@ CONFIG_PATH = "/etc/biosense/location-check.conf"
 
 DEFAULT_CONFIG = {
     "DISTANCE_THRESHOLD_METERS": 100,
-    "SAMPLES_FOR_AVERAGE": 30,
+    "INITIAL_CHECK_SAMPLES": 3,
+    "SET_LOCATION_SAMPLES": 30,
     "SLEEP_BETWEEN_READS": 1,
 }
 
@@ -81,21 +82,7 @@ def initialize_gps():
     return gps
 
 
-def get_valid_gps_reading(gps, sleep_interval):
-    """Retrieve the first valid GPS reading."""
-    while True:
-        if gps.get_nmea_data():
-            latitude = gps.gnss_messages.get("Latitude")
-            longitude = gps.gnss_messages.get("Longitude")
-            if latitude and longitude and (latitude != 0 or longitude != 0):
-                logging.info(
-                    f"Valid GPS reading: latitude={latitude}, longitude={longitude}"
-                )
-                return latitude, longitude
-        sleep(sleep_interval)
-
-
-def get_average_location(gps, samples, sleep_interval):
+def average_of_samples(gps, samples, sleep_interval):
     """Retrieve multiple GPS readings and calculate the average location."""
     readings = []
     for _ in range(samples):
@@ -114,7 +101,8 @@ def main():
     # Load configuration
     config = load_config()
     distance_threshold_meters = config["DISTANCE_THRESHOLD_METERS"]
-    samples_for_average = config["SAMPLES_FOR_AVERAGE"]
+    init_samples = config["INITIAL_CHECK_SAMPLES"]
+    set_loc_samples = config["SET_LOCATION_SAMPLES"]
     sleep_between_reads = config["SLEEP_BETWEEN_READS"]
 
     # Initialize GPS
@@ -127,7 +115,7 @@ def main():
         stored_latitude, stored_longitude = None, None
 
     # Quick initial check
-    latitude, longitude = get_valid_gps_reading(gps, sleep_between_reads)
+    latitude, longitude = average_of_samples(gps, init_samples, sleep_between_reads)
     if stored_latitude and stored_longitude:
         distance = geodesic(
             (stored_latitude, stored_longitude), (latitude, longitude)
@@ -139,8 +127,8 @@ def main():
 
     # If not close, gather more samples for a better fix
     logging.info("Location not close. Gathering additional samples.")
-    avg_latitude, avg_longitude = get_average_location(
-        gps, samples_for_average, sleep_between_reads
+    avg_latitude, avg_longitude = average_of_samples(
+        gps, set_loc_samples, sleep_between_reads
     )
     save_location(avg_latitude, avg_longitude)
 
