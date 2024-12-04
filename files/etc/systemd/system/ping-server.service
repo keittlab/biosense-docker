@@ -1,7 +1,7 @@
 [Unit]
 Description=Ping Server Service
 RequiresMountsFor=/home/biosense/datastore
-After=local-fs.target network.target
+After=local-fs.target network.target location-check.service
 
 [Service]
 EnvironmentFile=/etc/profile.d/geolocation.sh

@@ -1,7 +1,7 @@
 [Unit]
 Description=BirdNET Sound Analysis Service
 RequiresMountsFor=/home/biosense/datastore/sound_recordings
-After=local-fs.target
+After=local-fs.target location-check.service
 
 [Service]
 EnvironmentFile=/etc/profile.d/geolocation.sh

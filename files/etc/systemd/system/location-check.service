@@ -1,0 +1,13 @@
+[Unit]
+Description=GPS Location Check
+
+[Service]
+WorkingDirectory=/home/biosense/biosense_venv
+ExecStart=/home/biosense/biosense_venv/bin/python /usr/local/bin/location-check
+User=biosense
+Group=biosense
+Restart=no
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 [Unit]
 Description=Sound Recording Service
 RequiresMountsFor=/home/biosense/datastore
-After=local-fs.target
+After=local-fs.target location-check.service
 
 [Service]
 EnvironmentFile=/etc/profile.d/geolocation.sh

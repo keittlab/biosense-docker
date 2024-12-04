@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+
+import os
+import toml
+import logging
+from logging.handlers import RotatingFileHandler
+from time import sleep
+from geopy.distance import geodesic
+import qwiic_titan_gps
+
+# Configure logging
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "location-check.log")
+os.makedirs(log_dir, exist_ok=True)
+
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+LOCATION_CONFIG_PATH = "/etc/biosense/location.conf"
+CONFIG_PATH = "/etc/biosense/location-check.conf"
+
+DEFAULT_CONFIG = {
+    "DISTANCE_THRESHOLD_METERS": 100,
+    "SAMPLES_FOR_AVERAGE": 30,
+    "SLEEP_BETWEEN_READS": 1,
+}
+
+
+def load_config():
+    """Load the configuration values from the configuration file."""
+    if not os.path.exists(CONFIG_PATH):
+        logging.warning(
+            f"Configuration file not found at {CONFIG_PATH}. Using defaults."
+        )
+        return DEFAULT_CONFIG
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            config = toml.load(f)
+        logging.info(f"Configuration loaded successfully from {CONFIG_PATH}")
+        return {**DEFAULT_CONFIG, **config}
+    except Exception as e:
+        logging.error(f"Error reading configuration file: {e}")
+        return DEFAULT_CONFIG
+
+
+def load_location():
+    """Load the stored location from the configuration file."""
+    if not os.path.exists(LOCATION_CONFIG_PATH):
+        return None, None
+    try:
+        with open(LOCATION_CONFIG_PATH, "r") as f:
+            location = toml.load(f)
+        return location.get("latitude"), location.get("longitude")
+    except Exception as e:
+        logging.error(f"Error reading location configuration file: {e}")
+        return None, None
+
+
+def save_location(latitude, longitude):
+    """Save the updated location to the configuration file."""
+    location = {"latitude": latitude, "longitude": longitude}
+    try:
+        with open(LOCATION_CONFIG_PATH, "w") as f:
+            toml.dump(location, f)
+        logging.info(f"Updated location: latitude={latitude}, longitude={longitude}")
+    except Exception as e:
+        logging.error(f"Error writing to location configuration file: {e}")
+
+
+def initialize_gps():
+    """Initialize the GPS module."""
+    gps = qwiic_titan_gps.QwiicTitanGps()
+    if not gps.begin():
+        logging.error("Failed to initialize GPS. Exiting.")
+        exit(1)
+    logging.info("GPS initialized successfully.")
+    return gps
+
+
+def get_valid_gps_reading(gps, sleep_interval):
+    """Retrieve the first valid GPS reading."""
+    while True:
+        if gps.get_nmea_data():
+            latitude = gps.gnss_messages.get("Latitude")
+            longitude = gps.gnss_messages.get("Longitude")
+            if latitude and longitude and (latitude != 0 or longitude != 0):
+                logging.info(
+                    f"Valid GPS reading: latitude={latitude}, longitude={longitude}"
+                )
+                return latitude, longitude
+        sleep(sleep_interval)
+
+
+def get_average_location(gps, samples, sleep_interval):
+    """Retrieve multiple GPS readings and calculate the average location."""
+    readings = []
+    for _ in range(samples):
+        latitude, longitude = get_valid_gps_reading(gps, sleep_interval)
+        readings.append((latitude, longitude))
+        sleep(sleep_interval)
+    avg_latitude = sum(lat for lat, _ in readings) / len(readings)
+    avg_longitude = sum(lon for _, lon in readings) / len(readings)
+    logging.info(
+        f"Averaged location: latitude={avg_latitude}, longitude={avg_longitude}"
+    )
+    return avg_latitude, avg_longitude
+
+
+def main():
+    # Load configuration
+    config = load_config()
+    distance_threshold_meters = config["DISTANCE_THRESHOLD_METERS"]
+    samples_for_average = config["SAMPLES_FOR_AVERAGE"]
+    sleep_between_reads = config["SLEEP_BETWEEN_READS"]
+
+    # Initialize GPS
+    gps = initialize_gps()
+
+    # Load the stored location
+    stored_latitude, stored_longitude = load_location()
+    if stored_latitude is None or stored_longitude is None:
+        logging.info("No stored location found. Starting GPS fix process.")
+        stored_latitude, stored_longitude = None, None
+
+    # Quick initial check
+    latitude, longitude = get_valid_gps_reading(gps, sleep_between_reads)
+    if stored_latitude and stored_longitude:
+        distance = geodesic(
+            (stored_latitude, stored_longitude), (latitude, longitude)
+        ).meters
+        logging.info(f"Distance from stored location: {distance:.2f} meters")
+        if distance <= distance_threshold_meters:
+            logging.info("Location is within acceptable range. Exiting.")
+            return
+
+    # If not close, gather more samples for a better fix
+    logging.info("Location not close. Gathering additional samples.")
+    avg_latitude, avg_longitude = get_average_location(
+        gps, samples_for_average, sleep_between_reads
+    )
+    save_location(avg_latitude, avg_longitude)
+
+
+if __name__ == "__main__":
+    main()
