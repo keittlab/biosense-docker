@@ -82,6 +82,31 @@ def initialize_gps():
     return gps
 
 
+def get_valid_gps_reading(gps, sleep_interval, max_retries=10):
+    """Retrieve the first valid GPS reading with retry logic."""
+    retries = 0
+    while retries < max_retries:
+        try:
+            if gps.get_nmea_data():
+                latitude = gps.gnss_messages.get("Latitude")
+                longitude = gps.gnss_messages.get("Longitude")
+                if latitude and longitude and (latitude != 0 or longitude != 0):
+                    logging.info(
+                        f"Valid GPS reading: latitude={latitude}, longitude={longitude}"
+                    )
+                    return float(latitude), float(longitude)
+            else:
+                logging.debug("No NMEA data received from GPS.")
+        except Exception as e:
+            logging.warning(f"Error retrieving GPS data: {e}")
+        retries += 1
+        logging.info(f"Retrying GPS read ({retries}/{max_retries})...")
+        sleep(sleep_interval)
+
+    logging.error("Failed to retrieve a valid GPS reading after max retries.")
+    raise ValueError("Could not retrieve valid GPS data.")
+
+
 def average_of_samples(gps, samples, sleep_interval):
     """Retrieve multiple GPS readings and calculate the average location."""
     readings = []
