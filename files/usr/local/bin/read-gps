@@ -14,39 +14,48 @@ import signal
 import qwiic_titan_gps
 
 # Configure logging
-log_dir = '/var/log/biosense/'
-log_file = os.path.join(log_dir, 'read-gps.log')
+log_dir = "/var/log/biosense/"
+log_file = os.path.join(log_dir, "read-gps.log")
 os.makedirs(log_dir, exist_ok=True)
 
-log_handler = RotatingFileHandler(log_file, maxBytes=1*1024*1024, backupCount=5)
-logging.basicConfig(level=logging.INFO, handlers=[log_handler], format='%(asctime)s - %(levelname)s - %(message)s')
+log_handler = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler],
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 # SQLAlchemy setup
 Base = declarative_base()
 
+
 class GPSData(Base):
-    __tablename__ = 'gps_data'
+    __tablename__ = "gps_data"
     id = Column(Integer, primary_key=True, autoincrement=True)
     hostname = Column(String)
     timestamp = Column(DateTime, default=datetime.utcnow)
     key = Column(String)
     value = Column(String)
 
+
 def get_engine(db_path):
-    return create_engine(f'sqlite:///{db_path}')
+    return create_engine(f"sqlite:///{db_path}")
+
 
 def create_session(engine):
     Session = sessionmaker(bind=engine)
     return Session()
 
+
 def load_config(config_file):
     try:
-        with open(config_file, 'r') as f:
+        with open(config_file, "r") as f:
             config = toml.load(f)
         return config
     except Exception as e:
         logging.error(f"Error reading configuration file: {e}")
         sys.exit(1)
+
 
 def initialize_gps():
     gps = qwiic_titan_gps.QwiicTitanGps()
@@ -57,20 +66,22 @@ def initialize_gps():
     logging.info("GPS initialized successfully.")
     return gps
 
+
 def handle_signal(signum, frame):
     logging.info(f"Received signal {signum}, performing cleanup")
     sys.exit(0)
+
 
 def main():
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    config_file = '/etc/biosense/read-gps.conf'
+    config_file = "/etc/biosense/read-gps.conf"
     config = load_config(config_file)
 
-    interval = int(config['DEFAULT'].get('INTERVAL', 86400))
-    db_path = config['DEFAULT'].get('DB_PATH', '/home/biosense/datastore/gps_data.db')
-    hostname = os.uname().nodename.replace('-', '_')
+    interval = int(config["DEFAULT"].get("INTERVAL", 86400))
+    db_path = config["DEFAULT"].get("DB_PATH", "/home/biosense/datastore/gps_data.db")
+    hostname = os.uname().nodename.replace("-", "_")
 
     # Initialize the database engine and session
     engine = get_engine(db_path)
@@ -84,7 +95,7 @@ def main():
     while True:
         if gps.get_nmea_data():
             timestamp = datetime.utcnow()  # Store the UTC time of data retrieval
-            
+
             # Loop through all items in the gnss_messages dictionary and store each as a key-value pair
             for key, value in gps.gnss_messages.items():
                 if value is not None:  # Only store data if the value is not None
@@ -93,13 +104,16 @@ def main():
                         hostname=hostname,
                         timestamp=timestamp,
                         key=key,
-                        value=str(value)
+                        value=str(value),
                     )
                     session.add(new_data)
                     session.commit()
-                    logging.info(f"Stored GPS data - Hostname: {hostname}, Timestamp: {timestamp}, {key}: {value}")
+                    logging.info(
+                        f"Stored GPS data - Hostname: {hostname}, Timestamp: {timestamp}, {key}: {value}"
+                    )
 
         sleep(interval)
+
 
 if __name__ == "__main__":
     main()

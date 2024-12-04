@@ -63,6 +63,24 @@ def load_config(config_file):
         sys.exit(1)
 
 
+def load_location(location_file):
+    """Load latitude and longitude from the specified location file."""
+    if not os.path.exists(location_file):
+        logging.error(f"Location file {location_file} does not exist.")
+        sys.exit(1)
+    try:
+        with open(location_file, "r") as f:
+            location = toml.load(f)
+        latitude = location.get("latitude")
+        longitude = location.get("longitude")
+        if latitude is None or longitude is None:
+            raise ValueError("Missing latitude or longitude in location file.")
+        return float(latitude), float(longitude)
+    except Exception as e:
+        logging.error(f"Error reading location file: {e}")
+        sys.exit(1)
+
+
 def ping_server(address, ping_count, ping_wait):
     try:
         result = subprocess.run(
@@ -89,6 +107,7 @@ def main():
     signal.signal(signal.SIGTERM, handle_signal)
 
     config_file = "/etc/biosense/ping-server.conf"
+    location_file = "/etc/biosense/location.conf"
     config = load_config(config_file)
 
     interval = int(config["DEFAULT"].get("INTERVAL", 3600))
@@ -97,15 +116,8 @@ def main():
     ping_count = int(config["DEFAULT"].get("PING_COUNT", 10))
     ping_wait = int(config["DEFAULT"].get("PING_WAIT", 30))
 
-    # Retrieve latitude and longitude from environment variables, with fallback to 0.0 if invalid
-    try:
-        latitude = float(os.getenv("LATITUDE", "0.0"))
-        longitude = float(os.getenv("LONGITUDE", "0.0"))
-    except ValueError:
-        latitude, longitude = 0.0, 0.0
-        logging.warning(
-            "Invalid LATITUDE or LONGITUDE environment variable; defaulting to 0.0 for both."
-        )
+    # Load latitude and longitude from the location file
+    latitude, longitude = load_location(location_file)
 
     hostname = os.uname().nodename.replace("-", "_")
 

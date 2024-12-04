@@ -42,18 +42,18 @@ logging.basicConfig(
 )
 
 
-# Function to read configuration with error handling
 def read_config(config_file):
+    """Read and parse configuration file."""
     try:
         if not os.path.exists(config_file):
-            raise Exception(f"Configuration file does not exist: {config_file}")
+            raise FileNotFoundError(f"Configuration file does not exist: {config_file}")
 
         logging.info(f"Reading configuration file: {config_file}")
         with open(config_file, "r") as f:
             content = toml.load(f)
 
         if not content:
-            raise Exception("Configuration file is empty or not found.")
+            raise ValueError("Configuration file is empty.")
 
         return content["DEFAULT"]
     except Exception as e:
@@ -61,9 +61,31 @@ def read_config(config_file):
         sys.exit(1)
 
 
-# Read configuration
+def load_location(location_file):
+    """Load latitude and longitude from the location file."""
+    try:
+        if not os.path.exists(location_file):
+            raise FileNotFoundError(f"Location file does not exist: {location_file}")
+
+        with open(location_file, "r") as f:
+            location = toml.load(f)
+
+        latitude = location.get("latitude")
+        longitude = location.get("longitude")
+        if latitude is None or longitude is None:
+            raise ValueError("Latitude or longitude is missing in the location file.")
+
+        return float(latitude), float(longitude)
+    except Exception as e:
+        logging.error(f"Error reading location file: {e}")
+        sys.exit(1)
+
+
 config_file = "/etc/biosense/run-birdnet.conf"
+location_file = "/etc/biosense/location.conf"
+
 config = read_config(config_file)
+LATITUDE, LONGITUDE = load_location(location_file)
 
 RECORDING_DIR = config.get(
     "RECORDING_DIR", "/home/biosense/datastore/sound_recordings/"
@@ -75,26 +97,13 @@ PROCESSED_DIR = config.get(
     "PROCESSED_DIR", "/home/biosense/datastore/processed_recordings/"
 )
 SEGMENT_LENGTH = int(config.get("SEGMENT_LENGTH", 3))
-DB_PATH = config.get(
-    "DB_PATH", "/home/biosense/datastore/birdnet_results.db"
-)  # For SQLite
-MIN_CONF = float(config.get("MIN_CONF", 0.1))  # Read min_conf from config
-OVERLAP = float(config.get("OVERLAP", 1.5))  # Read overlap from config
-SENSITIVITY = float(config.get("SENSITIVITY", 1.0))  # Read sensitivity from config
-
-# Handle empty or invalid latitude/longitude values
-try:
-    LATITUDE = float(os.getenv("LATITUDE", "0.0"))
-    LONGITUDE = float(os.getenv("LONGITUDE", "0.0"))
-except ValueError:
-    LATITUDE, LONGITUDE = 0.0, 0.0
-    logging.warning(
-        "Invalid LATITUDE or LONGITUDE environment variable; defaulting to 0.0 for both."
-    )
+DB_PATH = config.get("DB_PATH", "/home/biosense/datastore/birdnet_results.db")
+MIN_CONF = float(config.get("MIN_CONF", 0.1))
+OVERLAP = float(config.get("OVERLAP", 1.5))
+SENSITIVITY = float(config.get("SENSITIVITY", 1.0))
 
 HOSTNAME = os.uname().nodename.replace("-", "_")
 
-# SQLAlchemy setup
 Base = declarative_base()
 
 
@@ -104,7 +113,7 @@ class Detection(Base):
     hostname = Column(String)
     latitude = Column(Float)
     longitude = Column(Float)
-    timestamp = Column(DateTime)  # Timestamp of the recording
+    timestamp = Column(DateTime)
     start_time = Column(Float)
     end_time = Column(Float)
     sci_name = Column(String, nullable=False)
@@ -115,34 +124,17 @@ class Detection(Base):
     file_path = Column(String, nullable=True)
 
     __table_args__ = (
-        Index(
-            "idx_com_name_timestamp", "com_name", "timestamp"
-        ),  # Filter by species and date
-        Index(
-            "idx_start_end_time", "start_time", "end_time"
-        ),  # Range-based queries for overlapping records
-        Index(
-            "idx_com_name_confidence", "com_name", "confidence"
-        ),  # Quickly find lowest confidence by species
-        Index("idx_sci_name", "sci_name"),  # Index for scientific name
+        Index("idx_com_name_timestamp", "com_name", "timestamp"),
+        Index("idx_start_end_time", "start_time", "end_time"),
+        Index("idx_com_name_confidence", "com_name", "confidence"),
+        Index("idx_sci_name", "sci_name"),
     )
 
 
-# Create the engine
 engine = create_engine(f"sqlite:///{DB_PATH}")
-
-# Ensure that the tables and indices are created
 Base.metadata.create_all(engine)
 
-
-# Define session creation function
-def create_session(engine):
-    Session = sessionmaker(bind=engine)
-    return Session()
-
-
-# Initialize the session
-session = create_session(engine)
+session = sessionmaker(bind=engine)()
 
 
 def validate_database(engine, expected_columns):
@@ -164,186 +156,6 @@ def validate_database(engine, expected_columns):
     except Exception as e:
         logging.error(f"Error inspecting database schema: {e}")
         return False
-
-
-def initialize_database(db_path, expected_columns):
-    if os.path.exists(db_path) and not validate_database(engine, expected_columns):
-        backup_db_path = f"{db_path}.backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        logging.warning(
-            f"Database schema does not match. Moving existing database to {backup_db_path}"
-        )
-        shutil.move(db_path, backup_db_path)
-        Base.metadata.create_all(engine)
-    return create_session(engine)
-
-
-# Expected columns in the database, maintaining order
-expected_columns = [
-    "id",
-    "hostname",
-    "latitude",
-    "longitude",
-    "timestamp",
-    "start_time",
-    "end_time",
-    "sci_name",
-    "com_name",
-    "confidence",
-    "is_likely",
-    "source_recording",
-    "file_path",
-]
-
-# Initialize database
-session = initialize_database(DB_PATH, expected_columns)
-
-
-def get_creation_time(filepath):
-    try:
-        # Extract initial timestamp and segment number from the filename
-        match = re.search(
-            r"_(\d{8}_\d{6})-(\d+)", filepath
-        )  # Pattern to match "_YYYYMMDD_HHMMSS-segment"
-        if match:
-            timestamp_str = match.group(1)
-            segment_number = int(match.group(2))
-
-            # Parse the initial timestamp
-            initial_time = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-
-            # Calculate the exact start time for this segment
-            segment_offset = timedelta(minutes=15 * (segment_number - 1))
-            return initial_time + segment_offset
-        else:
-            logging.error(
-                f"No valid timestamp or segment number found in filename: {filepath}"
-            )
-            return None
-    except Exception as e:
-        logging.error(f"Error parsing timestamp from filename {filepath}: {e}")
-        return None
-
-
-def create_partitioned_dir(base_dir, timestamp):
-    year = timestamp.strftime("%Y")
-    month = timestamp.strftime("%m")
-    day = timestamp.strftime("%d")
-    partitioned_dir = os.path.join(base_dir, year, month, day)
-    os.makedirs(partitioned_dir, exist_ok=True)
-    return partitioned_dir
-
-
-def on_analyze_complete(recording, recording_timestamp):
-    logging.info(f"Analyzed: {recording.path}")
-    logging.debug(f"Detections: {recording.detections}")
-
-    # Check for any human vocal detections
-    if any(
-        detection.get("common_name") == "Human vocal"
-        for detection in recording.detections
-    ):
-        try:
-            os.remove(recording.path)
-            logging.info(
-                f"Deleted source recording file due to human vocal detection: {recording.path}"
-            )
-            return None  # Return None to indicate the file was deleted
-        except Exception as e:
-            logging.error(f"Error deleting source recording file {recording.path}: {e}")
-            return recording.path  # Return the original path if deletion failed
-
-    # Move the recording to the processed directory after successful analysis
-    try:
-        processed_dir_partitioned = create_partitioned_dir(
-            PROCESSED_DIR, recording_timestamp
-        )
-        destination = os.path.join(
-            processed_dir_partitioned, os.path.basename(recording.path)
-        )
-        shutil.move(recording.path, destination)
-        logging.debug(f"Moved recording to processed directory: {destination}")
-        return destination
-    except Exception as e:
-        logging.error(f"Error moving recording: {recording.path} - {e}")
-        return recording.path
-
-
-def on_error(recording, error):
-    logging.error(f"Error: {error} in {recording.path}")
-    # Attempt to delete the corrupted .flac file
-    try:
-        os.remove(recording.path)
-        logging.info(f"Deleted corrupt .flac file: {recording.path}")
-    except Exception as e:
-        logging.error(f"Failed to delete corrupt .flac file {recording.path}: {e}")
-
-
-def extract_detected_segments(recording, recording_timestamp, source_recording_path):
-    export_dir_partitioned = create_partitioned_dir(EXPORT_DIR, recording_timestamp)
-    if not os.path.exists(export_dir_partitioned):
-        os.makedirs(export_dir_partitioned)
-
-    # Extract audio segments of detections using BirdNET's method
-    recording.extract_detections_as_audio(directory=export_dir_partitioned)
-
-    # Process each detection segment
-    for detection in recording.detections:
-        old_segment_filename = detection["extracted_audio_path"]
-
-        # Determine the new segment filename path
-        new_segment_filename = os.path.join(
-            export_dir_partitioned, os.path.basename(old_segment_filename)
-        )
-
-        if not old_segment_filename or not os.path.exists(old_segment_filename):
-            logging.error(
-                f"Extracted file not found or is None: {old_segment_filename}"
-            )
-            new_segment_filename = None  # Set to None to log as NULL in SQLite
-        else:
-            # Check if the detected sound is human vocal
-            if detection.get("common_name") == "Human vocal":
-                # If human voice is detected, delete the segment file and set filename to None
-                try:
-                    os.remove(old_segment_filename)
-                    logging.info(
-                        f"Deleted human vocal segment file: {old_segment_filename}"
-                    )
-                    new_segment_filename = None  # Set to None to log as NULL in SQLite
-                except Exception as e:
-                    logging.error(
-                        f"Error deleting human vocal file {old_segment_filename}: {e}"
-                    )
-            else:
-                # Move the non-human voice segment to the new location
-                shutil.move(old_segment_filename, new_segment_filename)
-                logging.debug(f"Extracted segment: {new_segment_filename}")
-
-        # Save detection to the database
-        detection_data = Detection(
-            hostname=HOSTNAME,
-            latitude=LATITUDE,
-            longitude=LONGITUDE,
-            timestamp=recording_timestamp,
-            start_time=detection["start_time"],
-            end_time=detection["end_time"],
-            sci_name=detection["scientific_name"],
-            com_name=detection["common_name"],
-            confidence=detection["confidence"],
-            is_likely=detection["is_predicted_for_location_and_date"],
-            source_recording=source_recording_path,
-            file_path=new_segment_filename,  # This will be NULL in the database if None
-        )
-        try:
-            logging.debug(
-                f"Attempting to write detection to database: {detection_data}"
-            )
-            session.add(detection_data)
-            session.commit()
-            logging.debug("Detection written to database successfully.")
-        except Exception as e:
-            logging.error(f"Error writing to database: {e}")
-            session.rollback()
 
 
 def analyze_recordings():
@@ -390,21 +202,15 @@ def analyze_recordings():
                     recording, recording_timestamp, new_source_recording_path
                 )
             except Exception as e:
-                on_error(recording, e)  # Handle and delete corrupt files
+                on_error(recording, e)
 
-        time.sleep(300)  # Check every 5 minutes for new files
+        time.sleep(300)
 
 
 def main():
-    def signal_handler(sig, frame):
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-
+    signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
     logging.info("Starting main loop.")
-    while True:
-        analyze_recordings()
-        time.sleep(300)  # Check every 5 minute
+    analyze_recordings()
 
 
 if __name__ == "__main__":

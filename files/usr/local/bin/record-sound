@@ -25,18 +25,18 @@ logging.basicConfig(
 )
 
 
-# Function to read configuration with error handling
 def read_config(config_file):
+    """Load configuration file."""
     try:
         if not os.path.exists(config_file):
-            raise Exception(f"Configuration file does not exist: {config_file}")
+            raise FileNotFoundError(f"Configuration file does not exist: {config_file}")
 
         logging.info(f"Reading configuration file: {config_file}")
         with open(config_file, "r") as f:
             content = toml.load(f)
 
         if not content:
-            raise Exception("Configuration file is empty or not found.")
+            raise ValueError("Configuration file is empty.")
 
         return content["DEFAULT"]
     except Exception as e:
@@ -44,24 +44,24 @@ def read_config(config_file):
         sys.exit(1)
 
 
-# Read configuration
-config_file = "/etc/biosense/record-sound.conf"
-config = read_config(config_file)
+def load_location(location_file):
+    """Load latitude and longitude from the location file."""
+    try:
+        if not os.path.exists(location_file):
+            raise FileNotFoundError(f"Location file does not exist: {location_file}")
 
-RECORDING_DIR = config.get(
-    "RECORDING_DIR", "/home/biosense/datastore/sound_recordings/"
-)
-RECORDING_DURATION_MINUTES = int(
-    config.get("RECORDING_DURATION_MINUTES", 15)
-)  # Minutes
-SLEEP_INTERVAL_SECONDS = int(
-    config.get("SLEEP_INTERVAL_SECONDS", 5)
-)  # Sleep interval in seconds
-RATE = int(config.get("RATE", 48000))  # Sample rate in Hz
-DEFAULT_FORMAT = config.get("DEFAULT_FORMAT", "S24_3LE")  # Configurable default format
-DEFAULT_CHANNELS = int(
-    config.get("DEFAULT_CHANNELS", 2)
-)  # Configurable default number of channels
+        with open(location_file, "r") as f:
+            location = toml.load(f)
+
+        latitude = location.get("latitude")
+        longitude = location.get("longitude")
+        if latitude is None or longitude is None:
+            raise ValueError("Latitude or longitude is missing in the location file.")
+
+        return float(latitude), float(longitude)
+    except Exception as e:
+        logging.error(f"Error reading location file: {e}")
+        sys.exit(1)
 
 
 def get_hostname():
@@ -69,10 +69,9 @@ def get_hostname():
     return hostname.replace("-", "_")
 
 
-# Function to automatically detect hardware ID
 def get_hw_params():
+    """Detect the hardware ID of the audio device."""
     try:
-        # List available capture devices
         process = Popen(["arecord", "-l"], stdout=PIPE, stderr=PIPE, text=True)
         stdout, stderr = process.communicate()
         logging.info(f"arecord -l output: {stdout}")
@@ -81,7 +80,6 @@ def get_hw_params():
             logging.error(f"Error in arecord -l: {stderr}")
             return None
 
-        # Example output parsing: card 1, device 0
         match = re.search(r"card (\d+):.*device (\d+):", stdout)
         if match:
             card = match.group(1)
@@ -97,68 +95,8 @@ def get_hw_params():
         return None
 
 
-# Function to detect supported format and channels using --dump-hw-params or fallback to arecord -L
-def get_supported_format_and_channels(hw_id):
-    try:
-        # Add -f S24_3LE to prevent defaulting to 8-bit format
-        process = Popen(
-            [
-                "arecord",
-                "-D",
-                hw_id,
-                "--dump-hw-params",
-                "-f",
-                DEFAULT_FORMAT,
-                "-d",
-                "0",
-            ],
-            stdout=PIPE,
-            stderr=PIPE,
-            text=True,
-        )
-        stdout, stderr = process.communicate()
-
-        logging.info(f"arecord --dump-hw-params output: {stdout}")
-        if process.returncode != 0:
-            logging.error(f"Error in arecord --dump-hw-params: {stderr}")
-            return (
-                DEFAULT_FORMAT,
-                DEFAULT_CHANNELS,
-            )  # Default format and channels in case of error
-
-        # Search for available formats in the output
-        format_match = re.search(r"Available formats:\s*-\s*(\S+)", stdout)
-        format_supported = (
-            format_match.group(1) if format_match else DEFAULT_FORMAT
-        )  # Default to config format
-
-        # Search for the supported number of channels
-        channels_match = re.search(r"CHANNELS:\s*(\d+)", stdout)
-        channels_supported = (
-            int(channels_match.group(1)) if channels_match else DEFAULT_CHANNELS
-        )  # Default to config channels
-
-        logging.info(
-            f"Detected supported format: {format_supported}, channels: {channels_supported}"
-        )
-        return format_supported, channels_supported
-    except Exception as e:
-        logging.error(f"Error detecting hardware format and channels: {e}")
-        return (
-            DEFAULT_FORMAT,
-            DEFAULT_CHANNELS,
-        )  # Default to config format and channels if detection fails
-
-
-def start_recording():
-    try:
-        latitude = float(os.getenv("LATITUDE", "0"))
-        longitude = float(os.getenv("LONGITUDE", "0"))
-    except ValueError:
-        logging.error("Invalid latitude or longitude values. Using default (0, 0).")
-        latitude = 0
-        longitude = 0
-
+def start_recording(latitude, longitude):
+    """Start the recording process."""
     lat_direction = "N" if latitude >= 0 else "S"
     lon_direction = "E" if longitude >= 0 else "W"
     latitude = abs(latitude)
@@ -168,41 +106,33 @@ def start_recording():
     formatted_lat_lon = f"{lat_str}{lat_direction}_{lon_str}{lon_direction}"
 
     hostname = get_hostname()
-
-    # Detect hardware ID and supported format and channels
     hw_id = get_hw_params()
     if hw_id is None:
         logging.error("Unable to detect hardware. Exiting.")
         sys.exit(1)
 
-    FORMAT, CHANNELS = get_supported_format_and_channels(
-        hw_id
-    )  # Get the supported format and channels
-
-    # Get timestamp just before launching arecord
+    # Get timestamp and file pattern
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_pattern = os.path.join(
         RECORDING_DIR, f"arecord_{hostname}_{formatted_lat_lon}_{timestamp}.wav"
     )
 
-    # Use detected hardware ID, format, and channels
+    # Start the recording process
     arecord_command = [
         "arecord",
         "-D",
         hw_id,
         "-f",
-        FORMAT,
-        f"-c{CHANNELS}",
+        DEFAULT_FORMAT,
+        f"-c{DEFAULT_CHANNELS}",
         f"-r{RATE}",
         "-t",
         "wav",
         "--max-file-time",
         str(RECORDING_DURATION_MINUTES * 60),
-        file_pattern,  # Convert minutes to seconds
+        file_pattern,
     ]
     logging.info(f"Starting recording with command: {' '.join(arecord_command)}")
-
-    # Run the process
     process = Popen(arecord_command, stdout=PIPE, stderr=PIPE, text=True)
 
     def signal_handler(sig, frame):
@@ -216,8 +146,8 @@ def start_recording():
 
     while True:
         time.sleep(SLEEP_INTERVAL_SECONDS)
-        if process.poll() is not None:  # Process has finished
-            if process.returncode != 0:  # Non-zero exit code indicates failure
+        if process.poll() is not None:
+            if process.returncode != 0:
                 stderr = process.stderr.read()
                 logging.error(
                     f"'arecord' failed with return code {process.returncode}: {stderr}"
@@ -229,11 +159,30 @@ def start_recording():
 
 
 def main():
+    # Load configurations
+    config_file = "/etc/biosense/record-sound.conf"
+    location_file = "/etc/biosense/location.conf"
+    config = read_config(config_file)
+
+    global RECORDING_DIR, RECORDING_DURATION_MINUTES, SLEEP_INTERVAL_SECONDS
+    global RATE, DEFAULT_FORMAT, DEFAULT_CHANNELS
+
+    RECORDING_DIR = config.get(
+        "RECORDING_DIR", "/home/biosense/datastore/sound_recordings/"
+    )
+    RECORDING_DURATION_MINUTES = int(config.get("RECORDING_DURATION_MINUTES", 15))
+    SLEEP_INTERVAL_SECONDS = int(config.get("SLEEP_INTERVAL_SECONDS", 5))
+    RATE = int(config.get("RATE", 48000))
+    DEFAULT_FORMAT = config.get("DEFAULT_FORMAT", "S24_3LE")
+    DEFAULT_CHANNELS = int(config.get("DEFAULT_CHANNELS", 2))
+
+    latitude, longitude = load_location(location_file)
+
     if not os.path.exists(RECORDING_DIR):
         os.makedirs(RECORDING_DIR)
         logging.info(f"Created recording directory: {RECORDING_DIR}")
 
-    start_recording()
+    start_recording(latitude, longitude)
 
 
 if __name__ == "__main__":

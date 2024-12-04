@@ -38,13 +38,26 @@ copy_and_set_ownership() {
     fi
 }
 
+# Function to update /etc/biosense/location.conf
+update_location_config() {
+    local latitude="$1"
+    local longitude="$2"
+    local location_file="/etc/biosense/location.conf"
+
+    mkdir -p "$(dirname "$location_file")" # Ensure the directory exists
+    {
+        echo "latitude = $latitude"
+        echo "longitude = $longitude"
+    } >"$location_file" &&
+        logtoboth "Updated location configuration: latitude=$latitude, longitude=$longitude in $location_file"
+}
+
 # Function to update /etc/biosense/setup-modem.conf based on sim_service
 update_modem_config() {
     local sim_service="$1"
     local config_file="$2"
 
     if [ -f "$config_file" ]; then
-        # Update the sim_service parameter in the config file
         sed -i "s/^sim_service=.*/sim_service=$sim_service/" "$config_file" &&
             logtoboth "Updated sim_service to '$sim_service' in $config_file"
     else
@@ -103,10 +116,8 @@ elif [ "$phase" == "1" ]; then
 
     sudo -u biosense /home/biosense/python/setup-python
     logtoboth "Created virtual environment and installed packages for biosense user from requirements.txt"
-    echo "LATITUDE=${latitude}" >/etc/profile.d/geolocation.sh
-    echo "export LATITUDE" >>/etc/profile.d/geolocation.sh
-    echo "LONGITUDE=${longitude}" >>/etc/profile.d/geolocation.sh
-    logtoboth "Added latitude and longitude environment variables"
+    update_location_config "$latitude" "$longitude" # Update /etc/biosense/location.conf
+    logtoboth "Added latitude and longitude to /etc/biosense/location.conf"
     logtoboth "* Plugin $pfx: Phase 1 completed"
 
 elif [ "$phase" == "post-install" ]; then
@@ -129,6 +140,7 @@ elif [ "$phase" == "post-install" ]; then
         "ping-server.service"
         "daily-connectivity-check.timer"
         "weekly-connectivity-check.timer"
+        "location-check.service"
     )
     for service in "${enable_services[@]}"; do
         sudo systemctl enable "$service" && logtoboth "Enabled $service"
