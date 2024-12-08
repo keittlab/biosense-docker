@@ -1,0 +1,9 @@
+[Unit]
+Description=Upload Biosense Logs Once Per Day
+Wants=send-logs.timer
+
+[Service]
+Type=oneshot
+User=biosense
+ExecStart=/usr/local/bin/send-logs
+EnvironmentFile=/etc/biosense/send-logs.conf

@@ -148,6 +148,8 @@ elif [ "$phase" == "post-install" ]; then
     disable_services=(
         "avahi-daemon.service"
         "nfs-common.service"
+        "apt-daily.timer"
+        "apt-daily-upgrade.timer"
     )
     for service in "${disable_services[@]}"; do
         sudo systemctl disable "$service" && logtoboth "Disabled $service"
