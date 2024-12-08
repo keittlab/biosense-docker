@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Load configuration
+CONFIG_FILE="/etc/biosense/send-logs.conf"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+else
+    echo "Configuration file not found: $CONFIG_FILE"
+    exit 1
+fi
+
+# Default tail lines if not set in configuration
+TAIL_LINES="${TAIL_LINES:-10}"
+
+# Derive hostname-based directory
+DEVICE_NAME=$(hostname) # Use the original hostname format
+REMOTE_DIR="${REMOTE_DIR_BASE}/${DEVICE_NAME}"
+
+# Compute target file name on the client
+TIMESTAMP=$(date "$DATE_FORMAT")
+# Compute target file name
+TARGET_FILE="${REMOTE_DIR}/logs-${TIMESTAMP}"
+
+# Send the file name and content
+{
+    echo "${TARGET_FILE}"
+    tail -n "${TAIL_LINES}" "${LOG_DIR}"/*.log
+} | ssh "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR} && cat > ${TARGET_FILE}"
