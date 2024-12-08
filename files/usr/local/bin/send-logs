@@ -22,7 +22,10 @@ TIMESTAMP=$(date "$DATE_FORMAT")
 TARGET_FILE="${REMOTE_DIR}/logs-${TIMESTAMP}"
 
 # Send the file name and content
+# For security, restrict the client pub key to only this command by adding
+# command="bash -c 'read TARGET_FILE; mkdir -p $(dirname \"$TARGET_FILE\") && cat > \"$TARGET_FILE\"'",no-agent-forwarding,no-X11-forwarding,no-pty
+# to client public key line in the server authorized_keys file
 {
     echo "${TARGET_FILE}"
     tail -n "${TAIL_LINES}" "${LOG_DIR}"/*.log
-} | ssh "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR} && cat > ${TARGET_FILE}"
+} | ssh -C "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR} && cat > ${TARGET_FILE}"
