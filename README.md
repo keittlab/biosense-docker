@@ -16,7 +16,6 @@ Currently, you need to:
 1. Place the biosense users public key into `files/home/biosense/.ssh/authorized_keys`
 1. Add a wireguard configuration template in `files/etc/wireguard/template.conf`
 1. Fill in the server wireguard public key in `files/etc/wireguard/template.conf`
-1. For 1nce, you will also need the openvpn files, which go in `files/etc/openvpn`
 
 These are not part of the github repo because I don't want the keys uploaded when it goes public. In the future, this will all be transparent and not needed.
 
