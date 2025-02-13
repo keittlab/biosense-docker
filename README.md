@@ -4,7 +4,9 @@ This repository contains software for automating the setup of raspberry pi compu
 
 If you use this software, please reach out and let us know! Also, please cite this repository. There is a "cite this repository" link along the right side of the main page.
 
-All software is copyright Timothy H. Keitt, 2025. [![DOI](https://zenodo.org/badge/803476299.svg)](https://doi.org/10.5281/zenodo.14867453)
+All software is copyright Timothy H. Keitt, 2025.
+
+[![DOI](https://zenodo.org/badge/803476299.svg)](https://doi.org/10.5281/zenodo.14867453)
 
 # biosense-docker
 
