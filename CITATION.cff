@@ -5,5 +5,5 @@ authors:
     given-names: "Timothy H."
 title: "Biosense"
 version: "v1.0.0"
-doi: 10.5281/zenodo.14867453
+doi: "10.5281/zenodo.14867453"
 url: "https://github.com/keittlab/biosense-docker"
