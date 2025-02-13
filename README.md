@@ -2,7 +2,7 @@
 
 This repository contains software for automating the setup of raspberry pi computers powering sensors in the field. It is currently somewhat particular to our applications, so it may not suit your needs. The use of docker here is to run the sdm utility to modify raspberry pi os images. The server side and sensors do not use docker. I am making this reposotry public in case it is useful. I am currently reworking the entire setup, so keep an eye on this space for a new version.
 
-If you use this software, please reach out and let us know! Also, please site this repository. You can find a DOI on the main page.
+If you use this software, please reach out and let us know! Also, please cite this repository. There is a "cite this repository" link along the right side of the main page.
 
 All software is copyright Timothy H. Keitt, 2025.
 
