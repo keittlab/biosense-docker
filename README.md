@@ -1,3 +1,11 @@
+# Overview
+
+This repository contains software for automating the setup of raspberry pi computers powering sensors in the field. It is currently somewhat particular to our applications, so it may not suit your needs. The use of docker here is to run the sdm utility to modify raspberry pi os images. The server side and sensors do not use docker. I am making this reposotry public in case it is useful. I am currently reworking the entire setup, so keep an eye on this space for a new version.
+
+If you use this software, please reach out and let us know! Also, please site this repository. You can find a DOI on the main page.
+
+All software is copyright Timothy H. Keitt, 2025.
+
 # biosense-docker
 
 These scripts require docker. You can install it [here](https://docs.docker.com/engine/install/). You also need to install `yq` if you want to save your configuration (`--save-config <file>`).
@@ -29,7 +37,7 @@ Address = <placeholder>/16
 [Peer]
 PublicKey = <the public wg key from the server>
 Endpoint = <server-address>:<server-port>
-AllowedIPs = 10.123.0.0/16
+AllowedIPs = <network>.0.0/16
 ```
 
 The `PrivateKey` and `Address` fields will be filled out as part of the customization process. The script will print out a command to make the new device able to connect to the server over wireguard. You must email that command to me so I can run it on geo. Each time `customize-image` is run, it will generate a new wireguard key-pair regardless of the wg-ip setting, so you have to update the server. You do not want to reuse the same wg-ip for multiple devices. The list of used ip's can be retrieved from the server's wireguard configuration, so ask me where to start adding wireguard ip numbers. `PersistentKeepalive` can be 25-seconds for networks with unlimited data. If data quotas are highly restrictive, the value shown will only send a keepalive ever 15 minutes. Connectivity maybe intermittent with such a long keepalive interval. 
