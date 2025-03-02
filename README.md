@@ -42,8 +42,8 @@ Endpoint = <server-address>:<server-port>
 AllowedIPs = <network>.0.0/16
 ```
 
-The `PrivateKey` and `Address` fields will be filled out as part of the customization process. The script will print out a command to make the new device able to connect to the server over wireguard. You must email that command to me so I can run it on geo. Each time `customize-image` is run, it will generate a new wireguard key-pair regardless of the wg-ip setting, so you have to update the server. You do not want to reuse the same wg-ip for multiple devices. The list of used ip's can be retrieved from the server's wireguard configuration, so ask me where to start adding wireguard ip numbers. `PersistentKeepalive` can be 25-seconds for networks with unlimited data. If data quotas are highly restrictive, the value shown will only send a keepalive ever 15 minutes. Connectivity maybe intermittent with such a long keepalive interval. 
+The `PrivateKey` and `Address` fields will be filled out as part of the customization process. The script will print out a command to make the new device able to connect to the server over wireguard. You must capture that output and update your wireguard configuration on your server. Each time `customize-image` is run, it will generate a new wireguard key-pair regardless of the wg-ip setting, so you have to update the server. You do not want to reuse the same wg-ip for multiple devices. The list of used ip's can be retrieved from the server's wireguard configuration. `PersistentKeepalive` can be 25-seconds for networks with unlimited data. If data quotas are highly restrictive, the value shown will only send a keepalive ever 15 minutes. Connectivity maybe intermittent with such a long keepalive interval. 
 
-The device will have a user `biosense` who holds the ssh public key for `biosense` on the server. That allows the server to ssh to the device without a password. For now, the device cannot ssh to the server as the public key is not uploaded. We might change that in the future or enable a restricted shell on the server so the device can upload only.
+
 
 
